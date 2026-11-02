@@ -5,6 +5,7 @@ import BreakdownTable, { EXTRA_COLS, SCENE_COLS } from './components/BreakdownTa
 import PdrView, { type PdrDay } from './components/PdrView';
 import ScheduleView, { type ScheduleNav } from './components/ScheduleView';
 import SidePanel from './components/SidePanel';
+import WhatsNewModal, { markWhatsNewSeen, shouldShowWhatsNew } from './components/WhatsNew';
 import { exportJSON, exportPDF, exportXLSX } from './export';
 import { importLegacyBoard, importScript, importScriptFile, NoScenesError, projectFromBrief } from './importers';
 import {
@@ -55,6 +56,11 @@ export default function App() {
   const [aiSettings, setAISettings] = useState<AISettings>(loadAISettings);
   const [aiDialog, setAIDialog] = useState<AIDialog>(null);
   const [pdrDay, setPdrDay] = useState<PdrDay | null>(null);
+  const [whatsNew, setWhatsNew] = useState(() => shouldShowWhatsNew(loadSaved() !== null));
+  const closeWhatsNew = () => {
+    markWhatsNewSeen();
+    setWhatsNew(false);
+  };
   const scriptInput = useRef<HTMLInputElement>(null);
   const shotListInput = useRef<HTMLInputElement>(null);
   /** The shooting date the shot list file picker is open for; null = a new project. */
@@ -478,6 +484,9 @@ export default function App() {
           {stats.scheduled}/{project.sheets.length} scheduled · {stats.days} shooting days
         </span>
         <span className="spacer" />
+        <button className="link" onClick={() => setWhatsNew(true)}>
+          What's new
+        </button>
         <button className="link" onClick={() => setAIDialog({ kind: 'settings' })} title="AI settings">
           AI: {aiLabel}
         </button>
@@ -488,6 +497,15 @@ export default function App() {
         )}
       </footer>
 
+      {whatsNew && (
+        <WhatsNewModal
+          onClose={closeWhatsNew}
+          onTry={() => {
+            closeWhatsNew();
+            setTab('pdr');
+          }}
+        />
+      )}
       {aiDialog?.kind === 'settings' && (
         <AISettingsModal
           settings={aiSettings}
