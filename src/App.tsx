@@ -2,8 +2,11 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import { loadAISettings, PROVIDERS, providerSettings, saveAISettings, type AISettings } from './ai';
 import { AIRunModal, AISettingsModal, BriefModal } from './components/AIDialogs';
 import BreakdownTable, { EXTRA_COLS, SCENE_COLS } from './components/BreakdownTable';
+import PdrView, { type PdrDay } from './components/PdrView';
 import ScheduleView, { type ScheduleNav } from './components/ScheduleView';
 import SidePanel from './components/SidePanel';
+import { UpdateBanner, UpdateSettingsModal } from './components/Updates';
+import WhatsNewModal, { markWhatsNewSeen, shouldShowWhatsNew } from './components/WhatsNew';
 import { exportJSON, exportPDF, exportXLSX } from './export';
 import { importLegacyBoard, importScript, importScriptFile, NoScenesError, projectFromBrief } from './importers';
 import {
@@ -15,12 +18,14 @@ import {
   type CategoryGroup,
   type Project,
 } from './model';
-import { askConfirm } from './platform';
+import { askConfirm, isDesktop } from './platform';
+import { checkForUpdate, loadUpdateSettings, saveUpdateSettings } from './updates';
 import { runRules } from './rules';
+import { attachShotList, projectFromShotList, readShotListFile, SHOT_LIST_ACCEPT } from './shots';
 import { loadSaved, reducer, saveProject, validateProject } from './store';
 
 type ColumnGroup = CategoryGroup | 'extra';
-type Tab = 'breakdown' | 'schedule';
+type Tab = 'breakdown' | 'schedule' | 'pdr';
 type AIDialog =
   | null
   /** `back` reopens the dialog the settings were opened from. */
@@ -52,7 +57,28 @@ export default function App() {
   const [saveFailed, setSaveFailed] = useState(false);
   const [aiSettings, setAISettings] = useState<AISettings>(loadAISettings);
   const [aiDialog, setAIDialog] = useState<AIDialog>(null);
+  const [pdrDay, setPdrDay] = useState<PdrDay | null>(null);
+  const [whatsNew, setWhatsNew] = useState(() => shouldShowWhatsNew(loadSaved() !== null));
+  const closeWhatsNew = () => {
+    markWhatsNewSeen();
+    setWhatsNew(false);
+  };
+  // Update check: desktop app only (the browser version is always current), and only if turned on.
+  const [updateCheck, setUpdateCheck] = useState(() => loadUpdateSettings().enabled);
+  const [updatesOpen, setUpdatesOpen] = useState(false);
+  const [newVersion, setNewVersion] = useState<string | null>(null);
+  const toggleUpdateCheck = (on: boolean) => {
+    saveUpdateSettings({ enabled: on });
+    setUpdateCheck(on);
+    if (on) void checkForUpdate().then(setNewVersion);
+  };
+  useEffect(() => {
+    if (isDesktop) void checkForUpdate().then(setNewVersion);
+  }, []);
   const scriptInput = useRef<HTMLInputElement>(null);
+  const shotListInput = useRef<HTMLInputElement>(null);
+  /** The shooting date the shot list file picker is open for; null = a new project. */
+  const shotListDate = useRef<string | null>(null);
   const projectInput = useRef<HTMLInputElement>(null);
   const exportMenu = useRef<HTMLDetailsElement>(null);
   const suggestMenu = useRef<HTMLDetailsElement>(null);
@@ -110,6 +136,44 @@ export default function App() {
       // No scene headings: offer to read the file as a creative brief instead.
       if (e instanceof NoScenesError) setAIDialog({ kind: 'brief', title: e.title, text: e.text });
       else fail(e);
+    }
+  };
+
+  const pickShotList = (date: string | null) => {
+    shotListDate.current = date;
+    shotListInput.current?.click();
+  };
+
+  /** A shot list starts a new project, or (with a date) fills in that shooting day and opens its PDR. */
+  const openShotList = async (file: File, date: string | null) => {
+    try {
+      const shots = await readShotListFile(file);
+      const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
+      if (date === null) {
+        const next = projectFromShotList(file.name.replace(/\.[^.]+$/, ''), shots);
+        if (!(await replaceProject(next))) return;
+        setTab('schedule');
+        setNav({ mode: 'week', date: toISO(new Date()) });
+        setNotice(
+          `Imported ${plural(shots.length, 'shot')} in ${plural(next.sheets.length, 'scene')}. Drag scenes onto shooting days, then click PDR on a day to get its shooting plan.`,
+        );
+        return;
+      }
+      const { project: next, matched, created } = attachShotList(project, shots, date);
+      dispatch({ type: 'load', project: next });
+      setPdrDay(date);
+      setTab('pdr');
+      setError('');
+      setNotice(
+        `Added ${plural(shots.length, 'shot')} to this day: ${[
+          matched && `${plural(matched, 'scene')} matched by number or set`,
+          created && `${plural(created, 'new scene')}`,
+        ]
+          .filter(Boolean)
+          .join(', ')}.`,
+      );
+    } catch (e) {
+      fail(e);
     }
   };
 
@@ -208,11 +272,17 @@ export default function App() {
           <button className={tab === 'schedule' ? 'active' : ''} onClick={() => setTab('schedule')}>
             Schedule
           </button>
+          <button className={tab === 'pdr' ? 'active' : ''} onClick={() => setTab('pdr')} title="Shooting plan per day">
+            PDR
+          </button>
         </nav>
         <span className="spacer" />
         {busy && <span className="muted">{busy}</span>}
         <button className="primary" onClick={() => scriptInput.current?.click()}>
           Import script
+        </button>
+        <button onClick={() => pickShotList(null)} title="Excel, Word table or tab-separated text">
+          Import shot list
         </button>
         <button
           onClick={() => projectInput.current?.click()}
@@ -244,6 +314,17 @@ export default function App() {
             const f = e.target.files?.[0];
             e.target.value = '';
             if (f) void openScript(f);
+          }}
+        />
+        <input
+          ref={shotListInput}
+          type="file"
+          accept={SHOT_LIST_ACCEPT}
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = '';
+            if (f) void openShotList(f, shotListDate.current);
           }}
         />
         <input
@@ -330,6 +411,8 @@ export default function App() {
         </div>
       )}
 
+      {newVersion && <UpdateBanner version={newVersion} onClose={() => setNewVersion(null)} />}
+
       {notice && (
         <div className="notice" role="status">
           {notice}{' '}
@@ -340,7 +423,18 @@ export default function App() {
       )}
 
       <main className="main">
-        {tab === 'schedule' ? (
+        {tab === 'pdr' ? (
+          <PdrView
+            project={project}
+            day={pdrDay}
+            setDay={setPdrDay}
+            dispatch={dispatch}
+            onUploadForDay={pickShotList}
+            onError={fail}
+            onGoToSchedule={() => setTab('schedule')}
+            onImportShotList={() => pickShotList(null)}
+          />
+        ) : tab === 'schedule' ? (
           <ScheduleView
             project={project}
             nav={nav}
@@ -353,6 +447,13 @@ export default function App() {
               setSelectedId(id);
               setTab('breakdown');
             }}
+            onOpenPdr={(date) => {
+              // A day without any shots asks for its shot list first; otherwise straight to its PDR.
+              const ids = new Set(project.schedule.byDate[date] ?? []);
+              if (!project.shots.some((s) => ids.has(s.sheetId))) return pickShotList(date);
+              setPdrDay(date);
+              setTab('pdr');
+            }}
           />
         ) : (
           <>
@@ -360,9 +461,13 @@ export default function App() {
               <div className="empty">
                 <h2>Start a breakdown</h2>
                 <p>Import a screenplay (PDF, Word .docx, Final Draft .fdx, Fountain or plain text) and every scene becomes a row you can break down. A creative brief or treatment without scene headings can be broken down into scenes with AI.</p>
+                <p>Already have a shot list? Import it instead (Excel, or a table in Word or text): its shots are grouped into scenes for the stripboard, and each shooting day gets a PDR.</p>
                 <div className="empty-actions">
                   <button className="primary" onClick={() => scriptInput.current?.click()}>
                     Import script
+                  </button>
+                  <button className="primary" onClick={() => pickShotList(null)}>
+                    Import shot list
                   </button>
                   <button onClick={loadSample}>Load sample script</button>
                   <button onClick={() => dispatch({ type: 'addSheet' })}>Start with a blank scene</button>
@@ -395,6 +500,14 @@ export default function App() {
           {stats.scheduled}/{project.sheets.length} scheduled · {stats.days} shooting days
         </span>
         <span className="spacer" />
+        <button className="link" onClick={() => setWhatsNew(true)}>
+          What's new
+        </button>
+        {isDesktop && (
+          <button className="link" onClick={() => setUpdatesOpen(true)} title="Optional check for new versions">
+            Updates: {updateCheck ? 'on' : 'off'}
+          </button>
+        )}
         <button className="link" onClick={() => setAIDialog({ kind: 'settings' })} title="AI settings">
           AI: {aiLabel}
         </button>
@@ -405,6 +518,24 @@ export default function App() {
         )}
       </footer>
 
+      {updatesOpen && (
+        <UpdateSettingsModal
+          enabled={updateCheck}
+          onChange={toggleUpdateCheck}
+          onFound={setNewVersion}
+          onClose={() => setUpdatesOpen(false)}
+        />
+      )}
+      {whatsNew && (
+        <WhatsNewModal
+          updateCheck={isDesktop ? { on: updateCheck, set: toggleUpdateCheck } : undefined}
+          onClose={closeWhatsNew}
+          onTry={() => {
+            closeWhatsNew();
+            setTab('pdr');
+          }}
+        />
+      )}
       {aiDialog?.kind === 'settings' && (
         <AISettingsModal
           settings={aiSettings}

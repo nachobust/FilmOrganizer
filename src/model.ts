@@ -70,6 +70,82 @@ export interface Schedule {
   byDate: Record<string, string[]>;
 }
 
+/** Framing, widest to tightest. Spanish shot lists (PG, PM, PP…) are read into these too. */
+export type ShotType = 'oner' | 'ws' | 'mws' | 'fs' | 'group' | 'ms' | 'mcu' | 'cu' | 'ecu' | 'insert';
+
+export const SHOT_TYPES: { key: ShotType; label: string; name: string; /** Spanish PDR label. */ es: string }[] = [
+  { key: 'oner', label: 'Oner', name: 'Oner (one continuous take)', es: 'Plano secuencia' },
+  { key: 'ws', label: 'WS', name: 'Wide shot', es: 'PG' },
+  { key: 'mws', label: 'MWS', name: 'Medium wide shot', es: 'PG corto' },
+  { key: 'fs', label: 'FS', name: 'Full / cowboy shot', es: 'PA' },
+  { key: 'group', label: 'Group MS', name: 'Group medium shot', es: 'PM conjunto' },
+  { key: 'ms', label: 'MS', name: 'Medium shot', es: 'PM' },
+  { key: 'mcu', label: 'MCU', name: 'Medium close-up', es: 'PM corto' },
+  { key: 'cu', label: 'CU', name: 'Close-up', es: 'PP' },
+  { key: 'ecu', label: 'ECU', name: 'Extreme close-up', es: 'PPP' },
+  { key: 'insert', label: 'Insert', name: 'Insert / detail', es: 'PD' },
+];
+
+/**
+ * Where a shot goes in the day: principal coverage first, quick inserts before lunch,
+ * field / product shots after lunch.
+ */
+export type ShotCategory = 'principal' | 'insert' | 'field';
+
+export const SHOT_CATEGORIES: { key: ShotCategory; label: string }[] = [
+  { key: 'principal', label: 'Principal' },
+  { key: 'insert', label: 'Insert' },
+  { key: 'field', label: 'Field / product' },
+];
+
+/** One camera setup or angle from a shot list, belonging to a scene. */
+export interface Shot {
+  id: string;
+  sheetId: string;
+  /** "[scene].[letter]", e.g. "01.A". */
+  number: string;
+  description: string;
+  talent: string[];
+  type: ShotType | '';
+  movement: string;
+  /** Estimated shooting minutes (setup + takes); the PDR default is used when empty. */
+  minutes: number | null;
+  keyShot: boolean;
+  /** "!!" alerts, shown in red in the PDR notes column. */
+  alerts: string[];
+  notes: string;
+  category: ShotCategory;
+  /** A change of location is a company move; a change of setup inside it is a reset. */
+  location: string;
+  setup: string;
+}
+
+/** Day timings used to build the PDR (durations in minutes, clock times as "HH:MM"). */
+export interface PdrSettings {
+  callTime: string;
+  prepMinutes: number;
+  lunchAt: string;
+  lunchMinutes: number;
+  resetMinutes: number;
+  moveMinutes: number;
+  wrapMinutes: number;
+  shotMinutes: number;
+  /** Language of the labels written into the PDR sheet; the app itself stays in English. */
+  sheetLanguage: 'en' | 'es';
+}
+
+export const DEFAULT_PDR: PdrSettings = {
+  callTime: '08:00',
+  prepMinutes: 120,
+  lunchAt: '14:00',
+  lunchMinutes: 60,
+  resetMinutes: 20,
+  moveMinutes: 45,
+  wrapMinutes: 30,
+  shotMinutes: 10,
+  sheetLanguage: 'en',
+};
+
 export interface Project {
   version: 1;
   title: string;
@@ -77,6 +153,9 @@ export interface Project {
   elements: BreakdownElement[];
   sheets: Sheet[];
   schedule: Schedule;
+  /** Shot lists, linked to scenes. Projects saved before shot lists existed have none. */
+  shots: Shot[];
+  pdr: PdrSettings;
 }
 
 export const GROUP_LABELS: Record<CategoryGroup, string> = {
@@ -150,6 +229,8 @@ export function newProject(title: string): Project {
     elements: [],
     sheets: [],
     schedule: newSchedule(),
+    shots: [],
+    pdr: { ...DEFAULT_PDR },
   };
 }
 
