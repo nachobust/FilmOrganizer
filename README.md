@@ -33,9 +33,13 @@ This is needed only once.
 - **Creative briefs (with AI)** — a brief, treatment or script without scene headings (PDF, Word or text) can be broken down by the AI into proposed scenes: locations, Int/Ext, Day/Night, characters, key shots and production risks. The scenes arrive as rows to review, and the rule-based breakdown then runs on them. Needs an AI provider; scripts with scene headings never do.
 - **Suggestions** — imported, rule and AI elements arrive as suggestions you accept or reject; hover a chip to see what produced it and the script line behind it. Your own edits always win, and rejected elements are never suggested again.
 - **Schedule** — month calendar with month/year navigation; click any day to open that week's drag-and-drop stripboard with an Unscheduled pool and per-day page totals.
+- **Shot lists** — import a shot list (Excel, or a table in Word or plain text; English or Spanish column names) to start a project from it, or add one to any shooting day from its column on the stripboard. Shots are grouped into scenes and their talent becomes cast.
+- **PDR (shooting plan)** — each shooting day becomes a timed plan: call, prep, one location at a time, full-cast masters first then each character closing in, inserts before lunch, field and product shots after, with resets and company moves timed. Change a shot's size, category or minutes and the day re-times itself. Export it as Excel, or into your own PDR template, with English or Spanish labels.
 - **Export** — PDF with the breakdown, calendar and stripboard, each starting on its own page; an Excel workbook with the same three as separate tabs (plus an Elements tab); and a JSON project file.
 
 Projects are saved automatically (in the app, or in the browser for the web version); use **Export → Project file** to keep a copy.
+
+The app sends nothing over the internet unless you use an online AI provider, or turn on the desktop app's optional update check (**Updates** in the status bar, off by default), which asks GitHub for the latest version number once a day.
 
 ## Run locally
 
@@ -67,7 +71,7 @@ npm run tauri build   # build an installer for this computer
 
 Installers for every system are built by GitHub Actions (`.github/workflows/release.yml`), free on public repositories:
 
-1. Update `version` in `package.json`.
+1. Update `version` in `package.json`. If the release has news for existing users, update `WHATS_NEW` in `src/components/WhatsNew.tsx`: they see it once after updating.
 2. Tag and push: `git tag v0.1.0 && git push origin v0.1.0`.
 3. When the workflow finishes, a draft release with all installers appears under **Releases**. Review it and press **Publish**.
 

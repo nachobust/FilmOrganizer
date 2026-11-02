@@ -1,10 +1,15 @@
 import {
+  DEFAULT_PDR,
   newSchedule,
   newSheet,
   uid,
   type BreakdownElement,
+  type PdrSettings,
   type Project,
   type Sheet,
+  type Shot,
+  type ShotCategory,
+  type ShotType,
   type Tag,
   type TagSource,
   type TagState,
@@ -40,7 +45,10 @@ export type Action =
   | { type: 'deleteElement'; elementId: string }
   /** date null = back to unscheduled; beforeId null = end of the day. */
   | { type: 'moveStrip'; sheetId: string; date: string | null; beforeId?: string | null }
-  | { type: 'clearSchedule' };
+  | { type: 'clearSchedule' }
+  | { type: 'updateShot'; id: string; patch: Partial<Shot> }
+  | { type: 'deleteShot'; id: string }
+  | { type: 'setPdr'; patch: Partial<PdrSettings> };
 
 const normalizeName = (categoryId: string, name: string) => {
   const n = name.trim().replace(/\s+/g, ' ');
@@ -92,7 +100,12 @@ export function reducer(p: Project, a: Action): Project {
       return { ...p, sheets };
     }
     case 'deleteSheet':
-      return { ...p, sheets: p.sheets.filter((s) => s.id !== a.id), schedule: unschedule(p.schedule, a.id) };
+      return {
+        ...p,
+        sheets: p.sheets.filter((s) => s.id !== a.id),
+        schedule: unschedule(p.schedule, a.id),
+        shots: p.shots.filter((s) => s.sheetId !== a.id),
+      };
     case 'moveStrip': {
       if (a.beforeId === a.sheetId) return p;
       const schedule = unschedule(p.schedule, a.sheetId);
@@ -104,6 +117,12 @@ export function reducer(p: Project, a: Action): Project {
     }
     case 'clearSchedule':
       return { ...p, schedule: newSchedule() };
+    case 'updateShot':
+      return { ...p, shots: p.shots.map((s) => (s.id === a.id ? { ...s, ...a.patch } : s)) };
+    case 'deleteShot':
+      return { ...p, shots: p.shots.filter((s) => s.id !== a.id) };
+    case 'setPdr':
+      return { ...p, pdr: { ...p.pdr, ...a.patch } };
     case 'addTag': {
       const name = normalizeName(a.categoryId, a.name);
       if (!name) return p;
@@ -263,5 +282,52 @@ export function validateProject(data: unknown): Project | null {
         const kept = ids.filter((id) => sheetIds.has(id));
         if (kept.length) byDate[date] = kept;
       }
-  return { version: 1, title: str(p.title) || 'Untitled', categories, elements, sheets, schedule: { byDate } };
+  const shots = (Array.isArray(p.shots) ? p.shots : [])
+    .filter((s) => isObj(s) && sheetIds.has(s.sheetId))
+    .map(validShot);
+  return {
+    version: 1,
+    title: str(p.title) || 'Untitled',
+    categories,
+    elements,
+    sheets,
+    schedule: { byDate },
+    shots,
+    pdr: validPdr(p.pdr),
+  };
+}
+
+const SHOT_TYPE_KEYS: ShotType[] = ['oner', 'ws', 'mws', 'fs', 'group', 'ms', 'mcu', 'cu', 'ecu', 'insert'];
+const strList = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+
+function validShot(s: Shot): Shot {
+  return {
+    id: str(s.id) || uid(),
+    sheetId: s.sheetId,
+    number: str(s.number),
+    description: str(s.description),
+    talent: strList(s.talent),
+    type: SHOT_TYPE_KEYS.includes(s.type as ShotType) ? s.type : '',
+    movement: str(s.movement),
+    minutes: typeof s.minutes === 'number' && s.minutes > 0 ? Math.round(s.minutes) : null,
+    keyShot: s.keyShot === true,
+    alerts: strList(s.alerts),
+    notes: str(s.notes),
+    category: (['principal', 'insert', 'field'] as ShotCategory[]).includes(s.category) ? s.category : 'principal',
+    location: str(s.location),
+    setup: str(s.setup),
+  };
+}
+
+function validPdr(raw: unknown): PdrSettings {
+  const pdr = { ...DEFAULT_PDR };
+  if (!isObj(raw)) return pdr;
+  for (const k of Object.keys(pdr) as (keyof PdrSettings)[]) {
+    const v = raw[k];
+    if (typeof pdr[k] === 'number' && typeof v === 'number' && v >= 0) (pdr[k] as number) = Math.round(v);
+  }
+  for (const k of ['callTime', 'lunchAt'] as const)
+    if (typeof raw[k] === 'string' && /^\d{1,2}:\d{2}$/.test(raw[k] as string)) pdr[k] = raw[k] as string;
+  if (raw.sheetLanguage === 'es') pdr.sheetLanguage = 'es';
+  return pdr;
 }

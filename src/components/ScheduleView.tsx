@@ -264,8 +264,14 @@ function WeekBoard(props: {
   selectedId: string | null;
   onSelect: (id: string) => void;
   onEdit: (draft: Draft) => void;
+  onOpenPdr: (date: string) => void;
 }) {
-  const { project, nav, setNav, dispatch, elMap, selectedId, onSelect, onEdit } = props;
+  const { project, nav, setNav, dispatch, elMap, selectedId, onSelect, onEdit, onOpenPdr } = props;
+  const shotsPerSheet = useMemo(() => {
+    const n = new Map<string, number>();
+    for (const s of project.shots) n.set(s.sheetId, (n.get(s.sheetId) ?? 0) + 1);
+    return n;
+  }, [project.shots]);
   const monday = weekStart(fromISO(nav.date));
   const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
   const sheets = useMemo(() => new Map(project.sheets.map((s) => [s.id, s])), [project.sheets]);
@@ -417,12 +423,24 @@ function WeekBoard(props: {
             const strips = ids.map((id) => sheets.get(id)).filter((s): s is Sheet => !!s);
             const eighths = strips.reduce((n, s) => n + s.pages, 0);
             const dayNo = dayNumbers.get(iso);
+            const shots = strips.reduce((n, s) => n + (shotsPerSheet.get(s.id) ?? 0), 0);
             return (
               <div key={iso} className={`day-col ${iso === toISO(new Date()) ? 'today' : ''}`}>
                 <div className="day-head">
                   <span className="dname">{WEEKDAYS[i]}</span>
                   <span className="ddate">{fmtShort(date)}</span>
                   {dayNo && <span className="dno">Day {dayNo}</span>}
+                  <button
+                    className={`pdr-btn ${dayNo ? '' : 'idle'}`}
+                    onClick={() => onOpenPdr(iso)}
+                    title={
+                      shots
+                        ? `Open this day's PDR (${shots} shot${shots === 1 ? '' : 's'})`
+                        : "Add this day's shot list and open its PDR"
+                    }
+                  >
+                    {shots ? 'PDR' : '+ Shot list'}
+                  </button>
                 </div>
                 <div className={`day-body ${overZone === iso ? 'drag-over' : ''}`} {...zone(iso, iso)}>
                   {strips.map((s) => card(s, iso, ids))}
@@ -431,7 +449,7 @@ function WeekBoard(props: {
                 <div className="day-foot">
                   <span>Total</span>
                   <span className="sum">
-                    {pagesLabel(eighths)} · {strips.length} sc
+                    {pagesLabel(eighths)} · {strips.length} sc{shots ? ` · ${shots} shots` : ''}
                   </span>
                 </div>
               </div>
@@ -456,6 +474,7 @@ export default function ScheduleView(props: {
   selectedId: string | null;
   onSelect: (id: string) => void;
   onOpenInBreakdown: (id: string) => void;
+  onOpenPdr: (date: string) => void;
 }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   return (
