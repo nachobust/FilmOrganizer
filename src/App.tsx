@@ -5,6 +5,7 @@ import BreakdownTable, { EXTRA_COLS, SCENE_COLS } from './components/BreakdownTa
 import PdrView, { type PdrDay } from './components/PdrView';
 import ScheduleView, { type ScheduleNav } from './components/ScheduleView';
 import SidePanel from './components/SidePanel';
+import { UpdateBanner, UpdateSettingsModal } from './components/Updates';
 import WhatsNewModal, { markWhatsNewSeen, shouldShowWhatsNew } from './components/WhatsNew';
 import { exportJSON, exportPDF, exportXLSX } from './export';
 import { importLegacyBoard, importScript, importScriptFile, NoScenesError, projectFromBrief } from './importers';
@@ -17,7 +18,8 @@ import {
   type CategoryGroup,
   type Project,
 } from './model';
-import { askConfirm } from './platform';
+import { askConfirm, isDesktop } from './platform';
+import { checkForUpdate, loadUpdateSettings, saveUpdateSettings } from './updates';
 import { runRules } from './rules';
 import { attachShotList, projectFromShotList, readShotListFile, SHOT_LIST_ACCEPT } from './shots';
 import { loadSaved, reducer, saveProject, validateProject } from './store';
@@ -61,6 +63,18 @@ export default function App() {
     markWhatsNewSeen();
     setWhatsNew(false);
   };
+  // Update check: desktop app only (the browser version is always current), and only if turned on.
+  const [updateCheck, setUpdateCheck] = useState(() => loadUpdateSettings().enabled);
+  const [updatesOpen, setUpdatesOpen] = useState(false);
+  const [newVersion, setNewVersion] = useState<string | null>(null);
+  const toggleUpdateCheck = (on: boolean) => {
+    saveUpdateSettings({ enabled: on });
+    setUpdateCheck(on);
+    if (on) void checkForUpdate().then(setNewVersion);
+  };
+  useEffect(() => {
+    if (isDesktop) void checkForUpdate().then(setNewVersion);
+  }, []);
   const scriptInput = useRef<HTMLInputElement>(null);
   const shotListInput = useRef<HTMLInputElement>(null);
   /** The shooting date the shot list file picker is open for; null = a new project. */
@@ -397,6 +411,8 @@ export default function App() {
         </div>
       )}
 
+      {newVersion && <UpdateBanner version={newVersion} onClose={() => setNewVersion(null)} />}
+
       {notice && (
         <div className="notice" role="status">
           {notice}{' '}
@@ -487,6 +503,11 @@ export default function App() {
         <button className="link" onClick={() => setWhatsNew(true)}>
           What's new
         </button>
+        {isDesktop && (
+          <button className="link" onClick={() => setUpdatesOpen(true)} title="Optional check for new versions">
+            Updates: {updateCheck ? 'on' : 'off'}
+          </button>
+        )}
         <button className="link" onClick={() => setAIDialog({ kind: 'settings' })} title="AI settings">
           AI: {aiLabel}
         </button>
@@ -497,8 +518,17 @@ export default function App() {
         )}
       </footer>
 
+      {updatesOpen && (
+        <UpdateSettingsModal
+          enabled={updateCheck}
+          onChange={toggleUpdateCheck}
+          onFound={setNewVersion}
+          onClose={() => setUpdatesOpen(false)}
+        />
+      )}
       {whatsNew && (
         <WhatsNewModal
+          updateCheck={isDesktop ? { on: updateCheck, set: toggleUpdateCheck } : undefined}
           onClose={closeWhatsNew}
           onTry={() => {
             closeWhatsNew();

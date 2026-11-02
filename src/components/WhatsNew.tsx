@@ -1,6 +1,8 @@
 // "What's new" popup: shown once to people who already used the app, after an update.
 // Nothing is sent anywhere; the last update seen is remembered in this browser / app only.
 
+import { UPDATE_CHECK_NOTE } from './Updates';
+
 /** Change `id` (and the notes) with each release that has news; the popup then shows once more. */
 export const WHATS_NEW = {
   id: '0.2.0',
@@ -39,7 +41,12 @@ export function markWhatsNewSeen() {
   }
 }
 
-export default function WhatsNewModal(props: { onClose: () => void; onTry: () => void }) {
+export default function WhatsNewModal(props: {
+  onClose: () => void;
+  onTry: () => void;
+  /** Desktop app only: the opt-in update check, offered here because this is when people read about updates. */
+  updateCheck?: { on: boolean; set: (on: boolean) => void };
+}) {
   return (
     <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && props.onClose()}>
       <div className="modal wide" role="dialog" aria-labelledby="whats-new-title">
@@ -51,6 +58,19 @@ export default function WhatsNewModal(props: { onClose: () => void; onTry: () =>
             </li>
           ))}
         </ul>
+        {props.updateCheck && (
+          <>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={props.updateCheck.on}
+                onChange={(e) => props.updateCheck!.set(e.target.checked)}
+              />
+              Tell me when the next version is out
+            </label>
+            <p className="modal-text small">{UPDATE_CHECK_NOTE}</p>
+          </>
+        )}
         <div className="modal-actions">
           <span className="spacer" />
           <button onClick={props.onTry}>Open the PDR tab</button>
