@@ -44,13 +44,13 @@ const columnText = (ws: ExcelJS.Worksheet, col: number) => {
   return out;
 };
 
-describe('PDR Excel export', () => {
+describe('Shooting plan Excel export', () => {
   const project = { ...newProject('Test shoot'), pdr: { ...DEFAULT_PDR, sheetLanguage: 'es' as const } };
   const rows = sequencePdr([shot('1.A', { keyShot: true, alerts: ['!! Sunset'] }), shot('1.B', { type: 'cu' })], project.pdr);
 
   it('writes its own sheet with Spanish labels and shot sizes', async () => {
     await exportPdrXLSX(project, rows, { subtitle: 'Día de rodaje 1', fileTag: ' day 1' });
-    expect(saved[saved.length - 1].name).toBe('Test shoot PDR day 1.xlsx');
+    expect(saved[saved.length - 1].name).toBe('Test shoot shooting plan day 1.xlsx');
     const ws = await lastWorkbook();
     expect(ws.getCell('A1').value).toBe('Test shoot');
     expect(ws.getCell('A4').value).toBe('HORAS');

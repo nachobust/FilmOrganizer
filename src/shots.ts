@@ -2,8 +2,11 @@
 // and turning those shots into scenes, either as a new project or for one shooting day.
 
 import {
+  addDays,
+  fromISO,
   newProject,
   newSheet,
+  toISO,
   uid,
   type Project,
   type Sheet,
@@ -20,6 +23,8 @@ export interface ParsedShot extends Omit<Shot, 'id' | 'sheetId'> {
   scene: string;
   intExt: string;
   dayNight: string;
+  /** Shooting day from a Day column (1 = first day); null when the list has none. */
+  day: number | null;
 }
 
 // ---------------------------------------------------------------- Shot types
@@ -67,29 +72,74 @@ type Column =
   | 'intExt'
   | 'dayNight';
 
+// Exact names, compared without accents, case, units in brackets or trailing punctuation.
 const HEADER_ALIASES: Record<Column, string[]> = {
-  number: ['#', 'no', 'no.', 'nº', 'n°', 'num', 'número', 'numero', 'plano nº', 'shot', 'shot #', 'shot#', 'shot no', 'shot number'],
-  scene: ['scene', 'scene #', 'scene no', 'sc', 'escena', 'sec', 'secuencia', 'escena / loc', 'scene/location'],
-  location: ['location', 'set', 'loc', 'localización', 'localizacion', 'locación', 'locacion'],
+  number: ['#', 'no', 'n', 'n.', 'nº', 'n°', 'no.', 'num', 'numero', 'plano n', 'plano nº', 'n plano', 'nº plano', 'num plano', 'numero de plano', 'shot', 'shot #', 'shot#', 'shot no', 'shot number', 'id'],
+  scene: ['scene', 'scene #', 'scene no', 'sc', 'escena', 'esc', 'sec', 'secuencia', 'escena / loc', 'scene/location', 'n escena', 'nº escena'],
+  location: ['location', 'set', 'loc', 'localizacion', 'locacion', 'lugar', 'decorado', 'espacio'],
   setup: ['setup', 'set up', 'setup id'],
-  type: ['shot type', 'type', 'size', 'shot size', 'framing', 'tipo de plano', 'tipo', 'plano', 'encuadre'],
-  talent: ['talent', 'cast', 'characters', 'character', 'subject', 'personajes', 'personaje', 'personajes / talent', 'reparto', 'quién', 'quien', 'sujeto'],
-  description: ['description', 'action', 'subject / action', 'subject/action', 'what', 'descripción', 'descripcion', 'acción', 'accion', 'concepto'],
-  movement: ['movement', 'camera movement', 'move', 'camera', 'movimiento', 'mov', 'cámara', 'camara'],
-  minutes: ['duration', 'min', 'mins', 'minutes', 'est. time', 'time', 'duración', 'duracion', 'minutos', 'tiempo'],
+  type: ['shot type', 'type', 'size', 'shot size', 'framing', 'tipo de plano', 'tipo', 'plano', 'encuadre', 'tamano', 'tamano de plano', 'valor de plano', 'angulo'],
+  talent: ['talent', 'talento', 'cast', 'characters', 'character', 'subject', 'personajes', 'personaje', 'personajes / talent', 'reparto', 'quien', 'sujeto', 'actor', 'actores', 'actriz', 'protagonista', 'protagonistas', 'casting'],
+  description: ['description', 'action', 'subject / action', 'subject/action', 'what', 'descripcion', 'descripcion del plano', 'accion', 'concepto', 'que pasa', 'contenido'],
+  movement: ['movement', 'camera movement', 'move', 'camera', 'movimiento', 'movimiento de camara', 'mov', 'camara'],
+  minutes: ['duration', 'min', 'mins', 'minutes', 'est. time', 'time', 'duracion', 'minutos', 'tiempo', 'tiempo de rodaje', 'tiempo estimado', 'duracion estimada'],
   key: ['key', 'key shot', 'clave', 'plano clave', '⭐'],
-  day: ['day', 'shoot day', 'día', 'dia', 'jornada'],
-  category: ['category', 'cat', 'cat.', 'categoría', 'categoria'],
-  notes: ['notes', 'note', 'comments', 'reference', 'ref', 'notas', 'notas / referencias', 'observaciones', 'obs', 'referencia', 'comentarios'],
+  day: ['day', 'shoot day', 'dia', 'jornada', 'dia de rodaje'],
+  category: ['category', 'cat', 'cat.', 'categoria'],
+  notes: ['notes', 'note', 'comments', 'reference', 'ref', 'notas', 'notas / referencias', 'observaciones', 'obs', 'referencia', 'referencias', 'comentarios', 'comentario'],
   intExt: ['int/ext', 'i/e', 'int-ext', 'int / ext'],
-  dayNight: ['d/n', 'day/night', 'día/noche', 'dia/noche', 'd / n'],
+  dayNight: ['d/n', 'day/night', 'dia/noche', 'd / n'],
 };
 
+// When no exact name matches: a word the header contains (checked in this order).
+const HEADER_KEYWORDS: [RegExp, Column][] = [
+  [/\b(int\.?\s*\/\s*ext|i\/e)\b/, 'intExt'],
+  [/\b(d\/n|dia\s*\/\s*noche|day\s*\/\s*night)\b/, 'dayNight'],
+  [/descrip|accion|action/, 'description'],
+  [/tipo de plano|encuadre|shot (type|size)|tamano/, 'type'],
+  [/personaj|talent|actor|actriz|reparto|\bcast\b|protagonist/, 'talent'],
+  [/locali|locacion|location|decorado/, 'location'],
+  [/movim|movement/, 'movement'],
+  [/duracion|duration|minut|tiempo/, 'minutes'],
+  [/nota|observ|comentari|referenc|notes?\b|comments?/, 'notes'],
+  [/escena|scene/, 'scene'],
+  [/categor/, 'category'],
+];
+
+const normalize = (s: string) =>
+  s
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/\(.*?\)|\[.*?\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[:.\s]+$/, '');
+
+/** On-screen length in seconds, not shooting time: never read as minutes. */
+const isSeconds = (header: string) => /\b(seg|segundos|secs?|seconds|s)\b|\(s\)|''/.test(header.toLowerCase());
+
 function columnOf(header: string): Column | null {
-  const h = header.trim().toLowerCase().replace(/[:\s]+$/, '').replace(/\s+/g, ' ');
+  const h = normalize(header);
+  if (!h) return null;
   for (const [col, names] of Object.entries(HEADER_ALIASES) as [Column, string[]][])
-    if (h === col.toLowerCase() || names.includes(h)) return col;
+    if (h === col.toLowerCase() || names.includes(h)) return col === 'minutes' && isSeconds(header) ? null : col;
+  for (const [re, col] of HEADER_KEYWORDS)
+    if (re.test(h)) return col === 'minutes' && isSeconds(header) ? null : col;
   return null;
+}
+
+/**
+ * "Plano" is the shot size in some lists and the shot number in others: when that column holds
+ * mostly numbers and there is no other number column, it is the number.
+ */
+function fixPlanoColumn(header: (Column | null)[], body: string[][]): (Column | null)[] {
+  const t = header.indexOf('type');
+  if (t < 0 || header.includes('number')) return header;
+  const values = body.map((r) => (r[t] ?? '').trim()).filter(Boolean);
+  const numeric = values.filter((v) => /^\d+[A-Z]?$|^\d+[.\-]\w+$/i.test(v)).length;
+  if (!values.length || numeric < values.length * 0.6) return header;
+  return header.map((c, i) => (i === t ? 'number' : c));
 }
 
 const TRUTHY = new Set(['x', 'yes', 'y', 'true', '1', 'si', 'sí', '⭐', 'key', '*']);
@@ -123,6 +173,7 @@ export function parseShotRows(rows: string[][]): ParsedShot[] {
     }
   }
   if (headerAt < 0) return [];
+  header = fixPlanoColumn(header, rows.slice(headerAt + 1));
 
   const shots: ParsedShot[] = [];
   let lastScene = '';
@@ -140,6 +191,9 @@ export function parseShotRows(rows: string[][]): ParsedShot[] {
       if (m) lastScene = m[1];
       continue;
     }
+    // Template rows that are numbered but still empty ("11", "12"… with nothing else) are not shots.
+    const filled = (['description', 'type', 'talent', 'location', 'notes', 'movement', 'minutes'] as Column[]).some((c) => cell(c));
+    if (!filled) continue;
     let notes = cell('notes');
     // "!!" marks an operational alert: it moves out of the text into the alerts.
     const alerts: string[] = [];
@@ -182,6 +236,7 @@ export function parseShotRows(rows: string[][]): ParsedShot[] {
       setup: cell('setup'),
       intExt: intExt.replace(/\./g, ''),
       dayNight: cell('dayNight').toUpperCase(),
+      day: Number(cell('day').match(/\d+/)?.[0]) || null,
     });
   }
   return shots;
@@ -349,13 +404,22 @@ function tagTalent(p: Project, sheetId: string, shots: ParsedShot[]): Project {
   return p;
 }
 
-/** A new project from a shot list: one scene per scene number, each with its shots. */
-export function projectFromShotList(title: string, shots: ParsedShot[]): Project {
+/**
+ * A new project from a shot list: one scene per scene number, each with its shots. A shot list is
+ * a shoot, so its scenes go straight onto shooting days: day 1 is `firstDate`, and a Day column
+ * ("Día 2") puts a scene that many days later.
+ */
+export function projectFromShotList(title: string, shots: ParsedShot[], firstDate: string): Project {
   let p = newProject(title);
   const groups = groupByScene(shots);
   p.sheets = groups.map((g, i) => sheetFromShots(g, String(i + 1), String(i + 1)));
   p.shots = groups.flatMap((g, i) => g.map((s) => toShot(s, p.sheets[i].id)));
   groups.forEach((g, i) => (p = tagTalent(p, p.sheets[i].id, g)));
+  const start = fromISO(firstDate);
+  groups.forEach((g, i) => {
+    const day = Math.min(...g.map((s) => s.day ?? 1));
+    p = reducer(p, { type: 'moveStrip', sheetId: p.sheets[i].id, date: toISO(addDays(start, day - 1)), beforeId: null });
+  });
   return runRules(p).project;
 }
 

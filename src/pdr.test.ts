@@ -193,3 +193,25 @@ describe('sequencePdr: day structure', () => {
     expect(fmtClock(24 * 60 + 30)).toBe('00:30');
   });
 });
+
+describe('sequencePdr: order set by hand', () => {
+  const day = [
+    shot('1', ['A'], 'ws', { setup: 'one', minutes: 30 }),
+    shot('2', ['A'], 'cu', { setup: 'one', minutes: 30 }),
+    shot('3', ['A'], 'ws', { location: 'Set B', minutes: 30 }),
+  ];
+  const cfg = { ...DEFAULT_PDR, lunchAt: '11:00' };
+
+  it('keeps the order, adds moves, and puts lunch before the first shot after the lunch time', () => {
+    const rows = sequencePdr(day, cfg, new Map([[1, [day[2].id, day[0].id, day[1].id]]]));
+    expect(numbers(rows)).toEqual(['3', '1', '2']);
+    expect(kinds(rows)).toEqual(['call', 'prep', 'shot', 'move', 'shot', 'lunch', 'shot', 'wrap', 'end']);
+  });
+
+  it('uses the minutes the user gave a company move', () => {
+    const moved = [day[0], { ...day[2], gapMinutes: 5 }];
+    const move = sequencePdr(moved, { ...cfg, lunchAt: '23:00' }).find((r) => r.kind === 'move')!;
+    expect(move.end! - move.start!).toBe(5);
+    expect(move.next?.number).toBe('3');
+  });
+});

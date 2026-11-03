@@ -5,13 +5,13 @@ import { UPDATE_CHECK_NOTE } from './Updates';
 
 /** Change `id` (and the notes) with each release that has news; the popup then shows once more. */
 export const WHATS_NEW = {
-  id: '0.2.0',
-  title: 'New: shot lists and the PDR',
+  id: '0.2.1',
+  title: 'New: shot lists and an editable shooting plan',
   items: [
-    ['Import a shot list', 'Start a project from a shot list (Excel, or a table in Word or text) instead of a script. English and Spanish column names both work.'],
-    ['A shot list per shooting day', 'On the stripboard, each day has a “+ Shot list” button: add that day’s shots and go straight to its PDR.'],
-    ['PDR tab', 'Each shooting day becomes a timed shooting plan: call, prep, one location at a time, masters first, inserts before lunch, product shots after. Change a shot and the day re-times itself.'],
-    ['Export the PDR', 'As an Excel sheet, or straight into your own PDR template. Sheet labels in English or Spanish.'],
+    ['Import a shot list', 'Start from a shot list (Excel, or a table in Word or text) instead of a script: it opens straight as that day’s shooting plan. English and Spanish column names both work.'],
+    ['A shot list per shooting day', 'On the stripboard, each day has a “+ Shot list” button: add that day’s shots and go straight to its shooting plan.'],
+    ['Shooting plan', 'Each shooting day becomes a timed plan: call, prep, one location at a time, masters first, inserts before lunch, product shots after. Edit descriptions and times, drag rows into your own order or delete them, and the day re-times itself.'],
+    ['Export to Excel', 'As an Excel sheet, or straight into your own template. Sheet labels in English or Spanish.'],
   ] as [string, string][],
 };
 
@@ -73,7 +73,7 @@ export default function WhatsNewModal(props: {
         )}
         <div className="modal-actions">
           <span className="spacer" />
-          <button onClick={props.onTry}>Open the PDR tab</button>
+          <button onClick={props.onTry}>Open the shooting plan</button>
           <button className="primary" autoFocus onClick={props.onClose}>
             Got it
           </button>
