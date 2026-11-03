@@ -8,9 +8,10 @@
 //   3. Then each character in turn, closing in (wide → medium → close) before the next
 //      character. A shot with several people goes with the first of them.
 //   4. A change of setup inside a location is a reset; a change of location is a company move.
-//   5. Inserts at the end of the morning, before lunch.
-//   6. Field / product shots after lunch.
+//   5. Inserts at the end of their location, so the company never goes back for them.
+//   6. Field / product shots after lunch, starting where the company already is.
 // Lunch is one block placed when the clock reaches the lunch time; a running block isn't split.
+// After lunch the same location needs no reset, but a new location still needs its move.
 
 import { SHOT_TYPES, shootDayNumbers, type PdrSettings, type Project, type Shot } from './model';
 
@@ -134,6 +135,7 @@ function sequenceDay(shots: PdrShot[], cfg: PdrSettings, day: number): PdrRow[] 
 
   let prev: Block | null = null;
   let lunched = false;
+  let justLunched = false;
   let blockId = 1;
   const lunch = (force: boolean) => {
     if (lunched || (!force && clock < lunchAt)) return;
@@ -141,13 +143,14 @@ function sequenceDay(shots: PdrShot[], cfg: PdrSettings, day: number): PdrRow[] 
     rows.push({ kind: 'lunch', day, start, end: start + cfg.lunchMinutes });
     clock = start + cfg.lunchMinutes;
     lunched = true;
-    prev = null; // no reset straight after lunch
+    justLunched = true;
   };
   const run = (blocks: Block[]) => {
     for (const b of blocks) {
       lunch(false);
-      if (prev) {
-        const move = prev.location !== b.location;
+      const move = !!prev && prev.location !== b.location;
+      if (prev && (move || !justLunched)) {
+        // The crew resets during lunch, but a company move still takes its time.
         const minutes = move ? cfg.moveMinutes : cfg.resetMinutes;
         rows.push({
           kind: move ? 'move' : 'reset',
@@ -158,6 +161,7 @@ function sequenceDay(shots: PdrShot[], cfg: PdrSettings, day: number): PdrRow[] 
         });
         clock += minutes;
       }
+      justLunched = false;
       for (const shot of b.shots) {
         const end = clock + (shot.minutes ?? cfg.shotMinutes);
         rows.push({ kind: 'shot', day, start: clock, end, shot, block: blockId });
@@ -169,14 +173,19 @@ function sequenceDay(shots: PdrShot[], cfg: PdrSettings, day: number): PdrRow[] 
   };
 
   const principal = shots.filter((s) => s.category === 'principal');
+  const inserts = shots.filter((s) => s.category === 'insert');
   const locations = [...new Set(principal.map((s) => s.location))];
   run([
-    ...locations.flatMap((loc) => orderPrincipal(principal.filter((s) => s.location === loc))),
-    ...bySetup(shots.filter((s) => s.category === 'insert')),
+    ...locations.flatMap((loc) => [
+      ...orderPrincipal(principal.filter((s) => s.location === loc)),
+      ...bySetup(inserts.filter((s) => s.location === loc)),
+    ]),
+    ...bySetup(inserts.filter((s) => !locations.includes(s.location))),
   ]);
-  const field = shots.filter((s) => s.category === 'field');
+  const field = bySetup(shots.filter((s) => s.category === 'field'));
+  const here = (prev as Block | null)?.location;
   lunch(true); // field shots are always after lunch, and a day without them still has lunch
-  run(bySetup(field));
+  run([...field.filter((b) => b.location === here), ...field.filter((b) => b.location !== here)]);
 
   rows.push({ kind: 'wrap', day, start: clock, end: clock + cfg.wrapMinutes });
   rows.push({ kind: 'end', day, start: clock + cfg.wrapMinutes });

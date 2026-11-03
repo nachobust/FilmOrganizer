@@ -139,6 +139,49 @@ describe('sequencePdr: day structure', () => {
     expect(rows[rows.indexOf(lunch) + 1].kind).toBe('shot'); // no reset straight after lunch
   });
 
+  it('keeps the company move when lunch falls on a location change', () => {
+    const rows = sequencePdr(
+      [shot('1', ['A'], 'ws', { location: 'Porch', minutes: 240 }), shot('2', ['A'], 'ws', { location: 'Street' })],
+      DEFAULT_PDR,
+    );
+    expect(kinds(rows)).toEqual(['call', 'prep', 'shot', 'lunch', 'move', 'shot', 'wrap', 'end']);
+    expect(rows.find((r) => r.kind === 'move')).toMatchObject({ from: 'Porch', to: 'Street' });
+  });
+
+  it('moves to field shots at another location after lunch', () => {
+    const rows = sequencePdr(
+      [shot('1', ['A'], 'ws', { location: 'Porch' }), shot('F', [], 'insert', { category: 'field', location: 'Street' })],
+      DEFAULT_PDR,
+    );
+    expect(kinds(rows)).toEqual(['call', 'prep', 'shot', 'lunch', 'move', 'shot', 'wrap', 'end']);
+  });
+
+  it('shoots inserts at their location instead of moving the company back', () => {
+    const rows = sequencePdr(
+      [
+        shot('1', ['A'], 'ws', { location: 'Porch' }),
+        shot('2', [], 'insert', { category: 'insert', location: 'Porch' }),
+        shot('3', ['A'], 'ws', { location: 'Kitchen' }),
+        shot('4', [], 'insert', { category: 'insert', location: 'Kitchen' }),
+      ],
+      { ...DEFAULT_PDR, lunchAt: '23:00' },
+    );
+    expect(numbers(rows)).toEqual(['1', '2', '3', '4']);
+    expect(rows.filter((r) => r.kind === 'move')).toHaveLength(1);
+  });
+
+  it('starts field shots where the company already is', () => {
+    const rows = sequencePdr(
+      [
+        shot('1', ['A'], 'ws', { location: 'Porch' }),
+        shot('F1', [], 'insert', { category: 'field', location: 'Street' }),
+        shot('F2', [], 'insert', { category: 'field', location: 'Porch' }),
+      ],
+      DEFAULT_PDR,
+    );
+    expect(numbers(rows)).toEqual(['1', 'F2', 'F1']);
+  });
+
   it('each day is timed on its own and days are joined by a separator', () => {
     const rows = sequencePdr([shot('2', ['A'], 'ws', { day: 2 }), shot('1', ['A'], 'ws', { day: 1 })], DEFAULT_PDR);
     expect(rows.filter((r) => r.kind === 'call').map((r) => r.start)).toEqual([480, 480]);
