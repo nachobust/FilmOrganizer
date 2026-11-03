@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { APP_VERSION, checkForUpdate, compareVersions, loadUpdateSettings, saveUpdateSettings } from './updates';
+import { APP_VERSION, checkForUpdate, compareVersions, latestVersion, loadUpdateSettings, saveUpdateSettings } from './updates';
 
 const store = new Map<string, string>();
 vi.stubGlobal('localStorage', {
@@ -46,5 +46,15 @@ describe('update check', () => {
       throw new Error('offline');
     }) as unknown as typeof fetch;
     expect(await checkForUpdate(NOW, broken)).toBeNull();
+  });
+});
+
+describe('latest version on GitHub', () => {
+  it('asks for a fresh answer and explains failures', async () => {
+    const f = release('v1.2.3');
+    expect(await latestVersion(f)).toBe('1.2.3');
+    expect((f as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls[0][1].cache).toBe('no-store');
+    const down = vi.fn(async () => new Response('', { status: 503 })) as unknown as typeof fetch;
+    await expect(latestVersion(down)).rejects.toThrow('GitHub answered with an error (503)');
   });
 });
