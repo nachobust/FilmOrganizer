@@ -75,6 +75,8 @@ Installers for every system are built by GitHub Actions (`.github/workflows/rele
 2. Tag and push: `git tag v0.1.0 && git push origin v0.1.0`.
 3. When the workflow finishes, a draft release with all installers appears under **Releases**. Review it and press **Publish**.
 
+The build also signs the update files that let installed apps update themselves (**Update now** in the app). It needs the repository secret `TAURI_SIGNING_PRIVATE_KEY`: the private half of the key whose public half is in `src-tauri/tauri.conf.json`. The maintainer keeps that key outside the repository; without the secret, release builds fail. If the key is lost, installed apps can no longer update themselves and need one manual install of a version with a new key.
+
 To test a build without making a release, open the **Actions** tab, choose **Release → Run workflow**; the installers are attached to the run as artifacts.
 
 ### Website

@@ -54,12 +54,27 @@ export async function checkForUpdate(now = Date.now(), fetchFn: typeof fetch = f
   if (!s.enabled || now - s.lastCheck < DAY) return null;
   saveUpdateSettings({ lastCheck: now });
   try {
-    const res = await fetchFn(LATEST_RELEASE, { headers: { Accept: 'application/vnd.github+json' } });
-    if (!res.ok) return null;
-    const tag = String((await res.json()).tag_name ?? '').replace(/^v/i, '');
-    if (!/^\d+\.\d+/.test(tag) || tag === s.skip) return null;
+    const tag = await latestVersion(fetchFn);
+    if (tag === s.skip) return null;
     return compareVersions(tag, APP_VERSION) > 0 ? tag : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * The latest release's version as GitHub reports it right now (never a cached answer, so a
+ * release published minutes ago is seen). Throws a readable error when GitHub can't be reached.
+ */
+export async function latestVersion(fetchFn: typeof fetch = fetch): Promise<string> {
+  let res: Response;
+  try {
+    res = await fetchFn(LATEST_RELEASE, { headers: { Accept: 'application/vnd.github+json' }, cache: 'no-store' });
+  } catch {
+    throw new Error('GitHub could not be reached. Check the internet connection.');
+  }
+  if (!res.ok) throw new Error(`GitHub answered with an error (${res.status}). Try again in a few minutes.`);
+  const tag = String((await res.json()).tag_name ?? '').replace(/^v/i, '');
+  if (!/^\d+\.\d+/.test(tag)) throw new Error('GitHub did not report a version.');
+  return tag;
 }
