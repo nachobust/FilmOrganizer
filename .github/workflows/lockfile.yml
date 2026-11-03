@@ -1,0 +1,22 @@
+# Temporary: adds the new crates to src-tauri/Cargo.lock (no Rust on the maintainer's machine),
+# keeping every existing crate at its locked version. Removed again in the next commit.
+name: Update Cargo.lock
+
+on:
+  push:
+    branches: [one-click-update]
+    paths: ['.github/workflows/lockfile.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: cargo fetch --manifest-path src-tauri/Cargo.toml
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cargo-lock
+          path: src-tauri/Cargo.lock
