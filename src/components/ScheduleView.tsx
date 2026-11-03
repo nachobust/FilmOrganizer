@@ -435,11 +435,11 @@ function WeekBoard(props: {
                     onClick={() => onOpenPdr(iso)}
                     title={
                       shots
-                        ? `Open this day's PDR (${shots} shot${shots === 1 ? '' : 's'})`
-                        : "Add this day's shot list and open its PDR"
+                        ? `Open this day's shooting plan (${shots} shot${shots === 1 ? '' : 's'})`
+                        : "Add this day's shot list and open its shooting plan"
                     }
                   >
-                    {shots ? 'PDR' : '+ Shot list'}
+                    {shots ? 'Shooting plan' : '+ Shot list'}
                   </button>
                 </div>
                 <div className={`day-body ${overZone === iso ? 'drag-over' : ''}`} {...zone(iso, iso)}>

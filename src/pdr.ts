@@ -1,4 +1,4 @@
-// PDR (plan de rodaje): orders a day's shots by production logic, not script order, and
+// Shooting plan (plan de rodaje, PDR): orders a day's shots by production logic, not script order, and
 // times the day around call, prep, lunch and wrap.
 //
 // Order within a day:
@@ -12,6 +12,7 @@
 //   6. Field / product shots after lunch, starting where the company already is.
 // Lunch is one block placed when the clock reaches the lunch time; a running block isn't split.
 // After lunch the same location needs no reset, but a new location still needs its move.
+// A day the user arranged by hand keeps their order (see sequenceManual).
 
 import { SHOT_TYPES, shootDayNumbers, type PdrSettings, type Project, type Shot } from './model';
 
@@ -33,6 +34,8 @@ export interface PdrRow {
   shot?: PdrShot;
   /** Shots sharing a block id share a setup. */
   block?: number;
+  /** Reset / company move: the shot it leads to (its minutes can be changed there). */
+  next?: PdrShot;
   /** Company move: from → to. */
   from?: string;
   to?: string;
@@ -123,7 +126,58 @@ function orderPrincipal(shots: PdrShot[]): Block[] {
   ];
 }
 
-function sequenceDay(shots: PdrShot[], cfg: PdrSettings, day: number): PdrRow[] {
+/** Adds the reset or company move before `next` and returns the clock after it. */
+function gap(rows: PdrRow[], from: string, next: PdrShot, move: boolean, clock: number, cfg: PdrSettings, day: number) {
+  // The crew resets during lunch, but a company move still takes its time.
+  const minutes = next.gapMinutes ?? (move ? cfg.moveMinutes : cfg.resetMinutes);
+  rows.push({
+    kind: move ? 'move' : 'reset',
+    day,
+    start: clock,
+    end: clock + minutes,
+    next,
+    ...(move ? { from, to: next.location } : {}),
+  });
+  return clock + minutes;
+}
+
+/**
+ * The user's own order: shots run exactly as listed. A change of setup or location still gets
+ * its reset or company move, and lunch comes before the first shot that would start after the
+ * lunch time.
+ */
+function sequenceManual(shots: PdrShot[], cfg: PdrSettings, day: number, rows: PdrRow[], start: number): number {
+  const lunchAt = toMinutes(cfg.lunchAt);
+  let clock = start;
+  let prev: PdrShot | null = null;
+  let lunched = false;
+  let justLunched = false;
+  let blockId = 0;
+  const lunch = () => {
+    const s = Math.max(clock, lunchAt);
+    rows.push({ kind: 'lunch', day, start: s, end: s + cfg.lunchMinutes });
+    clock = s + cfg.lunchMinutes;
+    lunched = justLunched = true;
+  };
+  for (const shot of shots) {
+    if (!lunched && clock >= lunchAt) lunch();
+    const changed = !prev || prev.location !== shot.location || setupOf(prev) !== setupOf(shot);
+    if (prev && changed) {
+      const move = prev.location !== shot.location;
+      if (move || !justLunched) clock = gap(rows, prev.location, shot, move, clock, cfg, day);
+    }
+    if (changed) blockId++;
+    justLunched = false;
+    const end = clock + (shot.minutes ?? cfg.shotMinutes);
+    rows.push({ kind: 'shot', day, start: clock, end, shot, block: blockId });
+    clock = end;
+    prev = shot;
+  }
+  if (!lunched) lunch();
+  return clock;
+}
+
+function sequenceDay(shots: PdrShot[], cfg: PdrSettings, day: number, order?: string[]): PdrRow[] {
   const call = toMinutes(cfg.callTime);
   const lunchAt = toMinutes(cfg.lunchAt);
   const rows: PdrRow[] = [{ kind: 'call', day, start: call }];
@@ -131,6 +185,21 @@ function sequenceDay(shots: PdrShot[], cfg: PdrSettings, day: number): PdrRow[] 
   if (cfg.prepMinutes > 0) {
     rows.push({ kind: 'prep', day, start: call, end: call + cfg.prepMinutes });
     clock += cfg.prepMinutes;
+  }
+
+  if (order) {
+    // Shots not in the saved order (added since) follow it, in the automatic order.
+    const auto = sequenceDay(shots, cfg, day)
+      .filter((r) => r.kind === 'shot')
+      .map((r) => r.shot!);
+    const at = (s: PdrShot) => {
+      const i = order.indexOf(s.id);
+      return i < 0 ? order.length + auto.indexOf(s) : i;
+    };
+    clock = sequenceManual([...shots].sort((a, b) => at(a) - at(b)), cfg, day, rows, clock);
+    rows.push({ kind: 'wrap', day, start: clock, end: clock + cfg.wrapMinutes });
+    rows.push({ kind: 'end', day, start: clock + cfg.wrapMinutes });
+    return rows;
   }
 
   let prev: Block | null = null;
@@ -149,18 +218,7 @@ function sequenceDay(shots: PdrShot[], cfg: PdrSettings, day: number): PdrRow[] 
     for (const b of blocks) {
       lunch(false);
       const move = !!prev && prev.location !== b.location;
-      if (prev && (move || !justLunched)) {
-        // The crew resets during lunch, but a company move still takes its time.
-        const minutes = move ? cfg.moveMinutes : cfg.resetMinutes;
-        rows.push({
-          kind: move ? 'move' : 'reset',
-          day,
-          start: clock,
-          end: clock + minutes,
-          ...(move ? { from: prev.location, to: b.location } : {}),
-        });
-        clock += minutes;
-      }
+      if (prev && (move || !justLunched)) clock = gap(rows, prev.location, b.shots[0], move, clock, cfg, day);
       justLunched = false;
       for (const shot of b.shots) {
         const end = clock + (shot.minutes ?? cfg.shotMinutes);
@@ -192,8 +250,11 @@ function sequenceDay(shots: PdrShot[], cfg: PdrSettings, day: number): PdrRow[] 
   return rows;
 }
 
-/** Orders shots day by day (ascending), joined by a day separator. */
-export function sequencePdr(shots: PdrShot[], cfg: PdrSettings): PdrRow[] {
+/**
+ * Orders shots day by day (ascending), joined by a day separator. `orders` holds the days the
+ * user arranged by hand (by shooting day number); the others are ordered automatically.
+ */
+export function sequencePdr(shots: PdrShot[], cfg: PdrSettings, orders: Map<number, string[]> = new Map()): PdrRow[] {
   const days = [...new Set(shots.map((s) => s.day))].sort((a, b) => a - b);
   return days.flatMap((day, i) => [
     ...(i ? [{ kind: 'daySep' as const, day }] : []),
@@ -201,6 +262,7 @@ export function sequencePdr(shots: PdrShot[], cfg: PdrSettings): PdrRow[] {
       shots.filter((s) => s.day === day),
       cfg,
       day,
+      orders.get(day),
     ),
   ]);
 }

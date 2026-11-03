@@ -48,7 +48,9 @@ export type Action =
   | { type: 'clearSchedule' }
   | { type: 'updateShot'; id: string; patch: Partial<Shot> }
   | { type: 'deleteShot'; id: string }
-  | { type: 'setPdr'; patch: Partial<PdrSettings> };
+  | { type: 'setPdr'; patch: Partial<PdrSettings> }
+  /** ids null = back to the automatic order for that date. */
+  | { type: 'setPdrOrder'; date: string; ids: string[] | null };
 
 const normalizeName = (categoryId: string, name: string) => {
   const n = name.trim().replace(/\s+/g, ' ');
@@ -123,6 +125,12 @@ export function reducer(p: Project, a: Action): Project {
       return { ...p, shots: p.shots.filter((s) => s.id !== a.id) };
     case 'setPdr':
       return { ...p, pdr: { ...p.pdr, ...a.patch } };
+    case 'setPdrOrder': {
+      const pdrOrder = { ...p.pdrOrder };
+      if (a.ids) pdrOrder[a.date] = a.ids;
+      else delete pdrOrder[a.date];
+      return { ...p, pdrOrder };
+    }
     case 'addTag': {
       const name = normalizeName(a.categoryId, a.name);
       if (!name) return p;
@@ -294,6 +302,13 @@ export function validateProject(data: unknown): Project | null {
     schedule: { byDate },
     shots,
     pdr: validPdr(p.pdr),
+    pdrOrder: isObj(p.pdrOrder)
+      ? Object.fromEntries(
+          Object.entries(p.pdrOrder)
+            .filter(([date, ids]) => /^\d{4}-\d{2}-\d{2}$/.test(date) && Array.isArray(ids))
+            .map(([date, ids]) => [date, strList(ids)]),
+        )
+      : {},
   };
 }
 
@@ -316,6 +331,7 @@ function validShot(s: Shot): Shot {
     category: (['principal', 'insert', 'field'] as ShotCategory[]).includes(s.category) ? s.category : 'principal',
     location: str(s.location),
     setup: str(s.setup),
+    gapMinutes: typeof s.gapMinutes === 'number' && s.gapMinutes >= 0 ? Math.round(s.gapMinutes) : null,
   };
 }
 

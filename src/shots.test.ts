@@ -94,3 +94,31 @@ describe('scenes from shot lists', () => {
     expect(attachShotList(project, parsed, '2026-11-03').project.shots).toHaveLength(3);
   });
 });
+
+describe('Spanish shot lists', () => {
+  it('reads accented, bracketed and reworded headers, and skips numbered empty rows', () => {
+    const shots = parseShotRows(
+      rowsFromText(
+        [
+          'Plano\tLocalización\tDescripción del plano\tTamaño de plano\tActores\tDuración (min)\tDuración (seg)\tObservaciones',
+          '1\tPorche\tAna y Leo llegan a la casa\tPM\tAna, Leo\t15\t4\tLuz natural',
+          '2\tPorche\tAna duda en la puerta\tPG\t\t\t6\t',
+          '3\t\t\t\t\t\t\t',
+          '4\t\t\t\t\t\t\t',
+        ].join('\n'),
+      ),
+    );
+    expect(shots).toHaveLength(2);
+    expect(shots[0]).toMatchObject({
+      number: '1',
+      location: 'Porche',
+      description: 'Ana y Leo llegan a la casa',
+      type: 'ms',
+      talent: ['Ana', 'Leo'],
+      minutes: 15,
+      notes: 'Luz natural',
+    });
+    // The seconds column is screen time, not shooting time.
+    expect(shots[1].minutes).toBeNull();
+  });
+});
