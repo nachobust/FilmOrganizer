@@ -5,13 +5,13 @@ import { UPDATE_CHECK_NOTE } from './Updates';
 
 /** Change `id` (and the notes) with each release that has news; the popup then shows once more. */
 export const WHATS_NEW = {
-  id: '0.2.1',
-  title: 'New: shot lists and an editable shooting plan',
+  id: '0.2.2',
+  title: 'New: arrange your shooting plan your way',
   items: [
-    ['Import a shot list', 'Start from a shot list (Excel, or a table in Word or text) instead of a script: it opens straight as that day’s shooting plan. English and Spanish column names both work.'],
-    ['A shot list per shooting day', 'On the stripboard, each day has a “+ Shot list” button: add that day’s shots and go straight to its shooting plan.'],
-    ['Shooting plan', 'Each shooting day becomes a timed plan: call, prep, one location at a time, masters first, inserts before lunch, product shots after. Edit descriptions and times, drag rows into your own order or delete them, and the day re-times itself.'],
-    ['Export to Excel', 'As an Excel sheet, or straight into your own template. Sheet labels in English or Spanish.'],
+    ['Drag works again', 'In the desktop app you can drag strips on the stripboard and rows in the shooting plan.'],
+    ['Every row is editable', 'Move, delete, rename and time resets, company moves and lunch like any shot, or add your own with “+ Add row”. Set a start or an end time on any row.'],
+    ['Move several rows at once', 'Tick the rows and drag one of them. Before anything moves, a window shows what changes and warns about a missing company move or overlapping times.'],
+    ['Drop a file to open it', 'Drag a project (.json), a shot list (.xlsx) or a script onto the window.'],
   ] as [string, string][],
 };
 
