@@ -205,6 +205,55 @@ export default function App() {
     }
   };
 
+  /** A file dropped anywhere on the window: a project opens, a shot list or script is imported. */
+  const openDropped = (file: File) => {
+    if (/\.json$/i.test(file.name)) return void openProject(file);
+    if (/\.(xlsx|xlsm|tsv)$/i.test(file.name)) return void openShotList(file, null);
+    if (/\.(pdf|docx|fdx|fountain|txt|md)$/i.test(file.name)) return void openScript(file);
+    setError(`“${file.name}” can't be opened here. Drop a project (.json), a shot list (.xlsx) or a script (.pdf, .docx, .fdx, .fountain, .txt).`);
+  };
+  const dropRef = useRef(openDropped);
+  dropRef.current = openDropped;
+  const [dropping, setDropping] = useState(false);
+  useEffect(() => {
+    // Only files from outside count; dragging rows and strips inside the app carries no files.
+    const hasFiles = (e: DragEvent) => !!e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+    let depth = 0;
+    const enter = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      depth++;
+      setDropping(true);
+    };
+    const over = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.dataTransfer!.dropEffect = 'copy';
+    };
+    const leave = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      depth = Math.max(0, depth - 1);
+      if (!depth) setDropping(false);
+    };
+    const drop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth = 0;
+      setDropping(false);
+      const file = e.dataTransfer!.files[0];
+      if (file) dropRef.current(file);
+    };
+    window.addEventListener('dragenter', enter);
+    window.addEventListener('dragover', over);
+    window.addEventListener('dragleave', leave);
+    window.addEventListener('drop', drop);
+    return () => {
+      window.removeEventListener('dragenter', enter);
+      window.removeEventListener('dragover', over);
+      window.removeEventListener('dragleave', leave);
+      window.removeEventListener('drop', drop);
+    };
+  }, []);
+
   const loadSample = async () => {
     try {
       const res = await fetch(encodeURI(SAMPLE));
@@ -259,6 +308,14 @@ export default function App() {
 
   return (
     <div className="app">
+      {dropping && (
+        <div className="drop-overlay" aria-hidden>
+          <div>
+            <b>Drop to open</b>
+            <span>A project (.json), a shot list (.xlsx) or a script (.pdf, .docx, .fdx, .fountain, .txt)</span>
+          </div>
+        </div>
+      )}
       <header className="topbar">
         <div className="brand">FilmOrganizer</div>
         <input
