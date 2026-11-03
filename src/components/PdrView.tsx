@@ -209,8 +209,8 @@ export default function PdrView(props: {
         </tbody>
       </table>
       <p className="hint">
-        Shots are ordered by production logic, not script order: full-cast masters first, then each character closing in,
-        inserts before lunch and field / product shots after it. Change a shot's category, size or minutes and the day
+        Shots are ordered by production logic, not script order: one location at a time, full-cast masters first, then
+        each character closing in, inserts before leaving the location and field / product shots after lunch. Change a shot's category, size or minutes and the day
         re-times itself. ⭐ marks a key shot.
       </p>
     </div>
