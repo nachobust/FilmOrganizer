@@ -5,9 +5,10 @@ import { UPDATE_CHECK_NOTE } from './Updates';
 
 /** Change `id` (and the notes) with each release that has news; the popup then shows once more. */
 export const WHATS_NEW = {
-  id: '0.2.2',
-  title: 'New: arrange your shooting plan your way',
+  id: '0.2.3',
+  title: 'New: one-click updates',
   items: [
+    ['Update now', 'From now on, when a new version is out the update bar has an “Update now” button: it downloads, installs and restarts the app for you. Turn it on under “Updates” in the bottom bar.'],
     ['Drag works again', 'In the desktop app you can drag strips on the stripboard and rows in the shooting plan.'],
     ['Every row is editable', 'Move, delete, rename and time resets, company moves and lunch like any shot, or add your own with “+ Add row”. Set a start or an end time on any row.'],
     ['Move several rows at once', 'Tick the rows and drag one of them. Before anything moves, a window shows what changes and warns about a missing company move or overlapping times.'],
