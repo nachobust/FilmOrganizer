@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type Dispatch } from 'react';
+import { useMemo, useRef, useState, type Dispatch, type DragEvent } from 'react';
 import {
   fromISO,
   SHOT_CATEGORIES,
@@ -10,8 +10,9 @@ import {
   type ShotCategory,
   type ShotType,
 } from '../model';
-import { pdrShots, sequencePdr, type PdrRow } from '../pdr';
+import { fmtClock, pdrShots, sequencePdr, toMinutes, type PdrRow, type PdrShot } from '../pdr';
 import { exportPdrIntoTemplate, exportPdrXLSX, pdrLabels, rowLabel, timeText } from '../pdr-export';
+import { askConfirm } from '../platform';
 import { SHOT_LIST_ACCEPT } from '../shots';
 import type { Action } from '../store';
 
@@ -30,6 +31,10 @@ const NUMBER_SETTINGS: [keyof PdrSettings, string][] = [
   ['shotMinutes', 'Default shot'],
 ];
 
+/** Enough rows for the text, so long descriptions are not cut off and short ones stay short. */
+const textRows = (text: string, perLine: number) =>
+  Math.max(1, text.split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(l.length / perLine)), 0));
+
 export default function PdrView(props: {
   project: Project;
   day: PdrDay | null;
@@ -46,11 +51,21 @@ export default function PdrView(props: {
   const dates = [...dayNumbers.keys()];
   const day: PdrDay | null = props.day === 'all' || (props.day && dayNumbers.has(props.day)) ? props.day : (dates[0] ?? null);
   const selected = day === 'all' ? dates : day ? [day] : [];
+  const single = day !== null && day !== 'all' ? day : null;
 
   const shots = useMemo(() => pdrShots(project, selected), [project, selected.join()]);
-  const rows = useMemo(() => sequencePdr(shots, project.pdr), [shots, project.pdr]);
+  const orders = useMemo(
+    () =>
+      new Map(
+        selected.filter((d) => project.pdrOrder[d]).map((d) => [dayNumbers.get(d)!, project.pdrOrder[d]] as const),
+      ),
+    [project.pdrOrder, selected.join(), dayNumbers],
+  );
+  const rows = useMemo(() => sequencePdr(shots, project.pdr, orders), [shots, project.pdr, orders]);
   const labels = pdrLabels(project.pdr.sheetLanguage);
   const [busy, setBusy] = useState(false);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropAt, setDropAt] = useState<{ id: string; before: boolean } | null>(null);
   const templateInput = useRef<HTMLInputElement>(null);
   const exportMenu = useRef<HTMLDetailsElement>(null);
 
@@ -59,8 +74,8 @@ export default function PdrView(props: {
       <div className="empty">
         <h2>No shooting days yet</h2>
         <p>
-          The PDR (shooting plan) is built per shooting day. Drag scenes onto days in Schedule, then open a day's PDR from
-          its column. You can also start from a shot list.
+          The shooting plan is built per shooting day. Drag scenes onto days in Schedule, then open a day's shooting plan
+          from its column. You can also start from a shot list.
         </p>
         <div className="empty-actions">
           <button className="primary" onClick={props.onGoToSchedule}>
@@ -91,7 +106,24 @@ export default function PdrView(props: {
   const shotCount = shots.filter((s) => !s.placeholder).length;
   const withoutList = [...new Set(shots.filter((s) => s.placeholder).map((s) => s.number || '—'))];
   const last = rows[rows.length - 1];
+  const showTalent = shots.some((s) => s.talent.length);
+  const columns = showTalent ? 9 : 8;
   const set = (patch: Partial<PdrSettings>) => dispatch({ type: 'setPdr', patch });
+
+  /** Moves a row before or after another one; from then on this day keeps the user's order. */
+  const reorder = (id: string, targetId: string, before: boolean) => {
+    if (!single || id === targetId) return;
+    const ids = rows.filter((r) => r.kind === 'shot').map((r) => r.shot!.id).filter((x) => x !== id);
+    ids.splice(ids.indexOf(targetId) + (before ? 0 : 1), 0, id);
+    dispatch({ type: 'setPdrOrder', date: single, ids });
+  };
+
+  const remove = async (s: PdrShot) => {
+    if (!s.placeholder) return dispatch({ type: 'deleteShot', id: s.id });
+    const date = selected.find((d) => (project.schedule.byDate[d] ?? []).includes(s.sheetId));
+    if (date && (await askConfirm(`Take scene ${s.number || '—'} off this shooting day? It goes back to Unscheduled.`)))
+      dispatch({ type: 'moveStrip', sheetId: s.sheetId, date: null });
+  };
 
   return (
     <div className="pdr">
@@ -104,9 +136,34 @@ export default function PdrView(props: {
           ))}
           <option value="all">All shooting days</option>
         </select>
-        {day !== 'all' && (
-          <button onClick={() => props.onUploadForDay(day!)} title={`Accepts ${SHOT_LIST_ACCEPT.replace(/,/g, ', ')}`}>
+        {single && (
+          <label className="shoot-date" title="Moves this whole shooting day to another date">
+            Shoot date
+            <input
+              type="date"
+              value={single}
+              onChange={async (e) => {
+                const to = e.target.value;
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(to) || to === single) return;
+                if (project.schedule.byDate[to]?.length && !(await askConfirm(`${fmtDay(to)} already has scenes. Add this day's scenes after them?`)))
+                  return;
+                dispatch({ type: 'moveDay', from: single, to });
+                props.setDay(to);
+              }}
+            />
+          </label>
+        )}
+        {single && (
+          <button onClick={() => props.onUploadForDay(single)} title={`Accepts ${SHOT_LIST_ACCEPT.replace(/,/g, ', ')}`}>
             Upload shot list for this day…
+          </button>
+        )}
+        {single && project.pdrOrder[single] && (
+          <button
+            onClick={() => dispatch({ type: 'setPdrOrder', date: single, ids: null })}
+            title="Forget the order you set and let the app order the shots again"
+          >
+            Back to automatic order
           </button>
         )}
         <span className="muted">
@@ -116,7 +173,7 @@ export default function PdrView(props: {
         <span className="spacer" />
         {busy && <span className="muted">Exporting…</span>}
         <details className="menu" ref={exportMenu}>
-          <summary>Export PDR ▾</summary>
+          <summary>Export shooting plan ▾</summary>
           <div className="menu-items">
             <button onClick={() => runExport(() => exportPdrXLSX(project, rows, info()))}>
               Excel <span className="muted">.xlsx</span>
@@ -128,7 +185,7 @@ export default function PdrView(props: {
               }}
               title="Keeps your template's header and call sheet and fills in the schedule below its column headers"
             >
-              Into my PDR template… <span className="muted">.xlsx</span>
+              Into my own template… <span className="muted">.xlsx</span>
             </button>
           </div>
         </details>
@@ -185,64 +242,176 @@ export default function PdrView(props: {
         <p className="hint">
           {withoutList.length === 1 ? 'Scene' : 'Scenes'} {withoutList.join(', ')} {withoutList.length === 1 ? 'has' : 'have'} no
           shot list, so {withoutList.length === 1 ? 'it shows' : 'each shows'} as one row timed at about an hour per page.
-          {day !== 'all' && ' Upload a shot list for this day to break them into shots.'}
+          {single && ' Upload a shot list for this day to break them into shots.'}
         </p>
       )}
 
       <table className="pdr-table">
         <thead>
           <tr>
+            <th className="c-drag" aria-label="Order" />
             <th className="c-time">Time</th>
-            <th className="c-scene">Scene</th>
-            <th>Description</th>
-            <th className="c-talent">Talent</th>
-            <th className="c-type">Shot</th>
+            <th className="c-scene">Shot</th>
+            <th className="c-desc">Description</th>
+            {showTalent && <th className="c-talent">Talent</th>}
+            <th className="c-type">Size</th>
             <th className="c-cat">Category</th>
-            <th className="c-min">Min</th>
-            <th>Production notes</th>
+            <th className="c-notes">Production notes</th>
+            <th className="c-del" aria-label="Delete" />
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => (
-            <Row key={i} row={r} labels={labels} dispatch={dispatch} defaultMinutes={project.pdr.shotMinutes} />
-          ))}
+          {rows.map((r, i) => {
+            if (r.kind !== 'shot') return <StructuralRow key={i} row={r} labels={labels} columns={columns} dispatch={dispatch} />;
+            const s = r.shot!;
+            const drop = dropAt?.id === s.id ? (dropAt.before ? 'drop-before' : 'drop-after') : '';
+            return (
+              <tr
+                key={s.id}
+                className={`pdr-shot ${s.keyShot ? 'key' : ''} ${s.placeholder ? 'placeholder' : ''} ${drop} ${dragId === s.id ? 'dragging' : ''}`}
+                onDragOver={(e: DragEvent<HTMLTableRowElement>) => {
+                  if (!dragId) return;
+                  e.preventDefault();
+                  const box = e.currentTarget.getBoundingClientRect();
+                  setDropAt({ id: s.id, before: e.clientY - box.top < box.height / 2 });
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (dragId && dropAt) reorder(dragId, s.id, dropAt.before);
+                  setDragId(null);
+                  setDropAt(null);
+                }}
+              >
+                <td className="c-drag">
+                  {single && (
+                    <span
+                      className="drag-handle"
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/plain', s.id);
+                        e.dataTransfer.effectAllowed = 'move';
+                        setDragId(s.id);
+                      }}
+                      onDragEnd={() => {
+                        setDragId(null);
+                        setDropAt(null);
+                      }}
+                      title="Drag to change the order"
+                    >
+                      ⋮⋮
+                    </span>
+                  )}
+                </td>
+                <ShotCells row={r} shot={s} showTalent={showTalent} dispatch={dispatch} defaultMinutes={project.pdr.shotMinutes} />
+                <td className="c-del">
+                  <button
+                    className="ghost del"
+                    onClick={() => void remove(s)}
+                    title={s.placeholder ? 'Take this scene off the day' : 'Delete this shot'}
+                    aria-label="Delete row"
+                  >
+                    ×
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
       <p className="hint">
-        Shots are ordered by production logic, not script order: one location at a time, full-cast masters first, then
-        each character closing in, inserts before leaving the location and field / product shots after lunch. Change a shot's category, size or minutes and the day
-        re-times itself. ⭐ marks a key shot.
+        {single
+          ? project.pdrOrder[single]
+            ? 'You set the order of this day. Times follow it; resets and company moves are added when the setup or location changes. '
+            : 'Shots are ordered by production logic: one location at a time, full-cast masters first, then each character closing in, inserts before leaving the location and field / product shots after lunch. Drag a row by ⋮⋮ to set your own order. '
+          : 'Pick a single day to change the order of its shots. '}
+        Edit the end time of a shot to change how long it takes. ⭐ marks a key shot.
       </p>
     </div>
   );
 }
 
-function Row(props: {
+function StructuralRow(props: { row: PdrRow; labels: ReturnType<typeof pdrLabels>; columns: number; dispatch: Dispatch<Action> }) {
+  const { row, labels, columns, dispatch } = props;
+  const next = row.next;
+  const editable = (row.kind === 'reset' || row.kind === 'move') && next && !next.placeholder;
+  return (
+    <tr className={`pdr-${row.kind}`}>
+      <td className="c-drag" />
+      <td className="c-time">{row.kind === 'end' || row.kind === 'daySep' ? '' : timeText(row)}</td>
+      <td colSpan={columns - 2}>
+        {rowLabel(row, labels)}
+        {editable && (
+          <span className="gap-edit">
+            <input
+              type="number"
+              min={0}
+              step={5}
+              value={(row.end ?? 0) - (row.start ?? 0)}
+              onChange={(e) =>
+                dispatch({ type: 'updateShot', id: next.id, patch: { gapMinutes: Math.max(0, Math.round(Number(e.target.value) || 0)) } })
+              }
+              aria-label="Minutes"
+            />
+            min
+          </span>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+function ShotCells(props: {
   row: PdrRow;
-  labels: ReturnType<typeof pdrLabels>;
+  shot: PdrShot;
+  showTalent: boolean;
   dispatch: Dispatch<Action>;
   defaultMinutes: number;
 }) {
-  const { row, labels, dispatch } = props;
-  if (row.kind !== 'shot')
-    return (
-      <tr className={`pdr-${row.kind}`}>
-        <td className="c-time">{row.kind === 'end' || row.kind === 'daySep' ? '' : timeText(row)}</td>
-        <td colSpan={7}>{rowLabel(row, labels)}</td>
-      </tr>
-    );
-  const s = row.shot!;
-  const update = (patch: Partial<Shot>) =>
-    dispatch({ type: 'updateShot', id: s.id, patch });
+  const { row, shot: s, dispatch } = props;
+  const update = (patch: Partial<Shot>) => dispatch({ type: 'updateShot', id: s.id, patch });
+  const start = row.start ?? 0;
+  const notes = [...s.alerts, s.notes].filter(Boolean).join('\n');
   return (
-    <tr className={`pdr-shot ${s.keyShot ? 'key' : ''} ${s.placeholder ? 'placeholder' : ''}`}>
-      <td className="c-time">{timeText(row)}</td>
+    <>
+      <td className="c-time">
+        <span className="time-range">
+          {fmtClock(start)} –
+          {s.placeholder ? (
+            <span> {fmtClock(row.end ?? start)}</span>
+          ) : (
+            <input
+              type="time"
+              value={fmtClock(row.end ?? start)}
+              onChange={(e) => {
+                if (!e.target.value) return;
+                const minutes = toMinutes(e.target.value) - start;
+                if (minutes > 0) update({ minutes });
+              }}
+              aria-label="Ends at"
+              title={`Ends at (default length ${props.defaultMinutes} min)`}
+            />
+          )}
+        </span>
+      </td>
       <td className="c-scene">
         <b>{s.number || '—'}</b>
         {s.location && <div className="muted">{s.location}</div>}
       </td>
-      <td>{s.description}</td>
-      <td className="c-talent">{s.talent.join(', ')}</td>
+      <td className="c-desc">
+        <textarea
+          className="cell-text"
+          value={s.description}
+          rows={textRows(s.description, 48)}
+          placeholder="Description"
+          onChange={(e) =>
+            s.placeholder
+              ? dispatch({ type: 'updateSheet', id: s.sheetId, patch: { synopsis: e.target.value } })
+              : update({ description: e.target.value })
+          }
+          aria-label="Description"
+        />
+      </td>
+      {props.showTalent && <td className="c-talent">{s.talent.join(', ')}</td>}
       <td className="c-type">
         {s.placeholder ? (
           <span className="muted">No shot list</span>
@@ -277,23 +446,22 @@ function Row(props: {
           </select>
         )}
       </td>
-      <td className="c-min">
-        {!s.placeholder ? (
-          <input
-            type="number"
-            min={1}
-            value={s.minutes ?? ''}
-            placeholder={String(props.defaultMinutes)}
-            onChange={(e) => update({ minutes: Number(e.target.value) > 0 ? Math.round(Number(e.target.value)) : null })}
-            aria-label="Shooting minutes"
-          />
+      <td className={`c-notes ${s.alerts.length ? 'alert' : ''}`}>
+        {s.placeholder ? (
+          notes
         ) : (
-          (row.end ?? 0) - (row.start ?? 0)
+          <textarea
+            className="cell-text"
+            value={s.notes}
+            rows={textRows(s.notes, 30)}
+            placeholder="Notes"
+            onChange={(e) => update({ notes: e.target.value })}
+            aria-label="Production notes"
+          />
         )}
+        {!s.placeholder && s.alerts.length > 0 && <div className="alert-text">{s.alerts.join('\n')}</div>}
+        {s.movement && <div className="muted">Camera: {s.movement}</div>}
       </td>
-      <td className={s.alerts.length ? 'alert' : ''}>
-        {[...s.alerts, s.notes, s.movement && `Camera: ${s.movement}`].filter(Boolean).join('\n')}
-      </td>
-    </tr>
+    </>
   );
 }
