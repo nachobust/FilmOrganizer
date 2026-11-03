@@ -1,16 +1,30 @@
-import { useMemo, useRef, useState, type Dispatch, type DragEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type Dispatch, type DragEvent } from 'react';
 import {
   fromISO,
   SHOT_CATEGORIES,
   SHOT_TYPES,
   shootDayNumbers,
+  uid,
   type PdrSettings,
+  type PlanItem,
+  type PlanItemKind,
   type Project,
   type Shot,
   type ShotCategory,
   type ShotType,
 } from '../model';
-import { fmtClock, pdrShots, sequencePdr, toMinutes, type PdrRow, type PdrShot } from '../pdr';
+import {
+  defaultMinutes,
+  fmtClock,
+  isPlanRow,
+  pdrShots,
+  planFromRows,
+  planWarnings,
+  sequencePdr,
+  toMinutes,
+  type PdrRow,
+  type PdrShot,
+} from '../pdr';
 import { exportPdrIntoTemplate, exportPdrXLSX, pdrLabels, rowLabel, timeText } from '../pdr-export';
 import { askConfirm } from '../platform';
 import { SHOT_LIST_ACCEPT } from '../shots';
@@ -31,9 +45,24 @@ const NUMBER_SETTINGS: [keyof PdrSettings, string][] = [
   ['shotMinutes', 'Default shot'],
 ];
 
+const ADD_ROWS: [PlanItemKind, string][] = [
+  ['reset', 'Reset'],
+  ['move', 'Company move'],
+  ['lunch', 'Lunch'],
+  ['break', 'Break (your own name)'],
+];
+
 /** Enough rows for the text, so long descriptions are not cut off and short ones stay short. */
 const textRows = (text: string, perLine: number) =>
   Math.max(1, text.split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(l.length / perLine)), 0));
+
+/** A move waiting for the user to confirm it in the warning popup. */
+interface PendingMove {
+  title: string;
+  lines: string[];
+  warnings: string[];
+  items: PlanItem[];
+}
 
 export default function PdrView(props: {
   project: Project;
@@ -52,44 +81,63 @@ export default function PdrView(props: {
   const day: PdrDay | null = props.day === 'all' || (props.day && dayNumbers.has(props.day)) ? props.day : (dates[0] ?? null);
   const selected = day === 'all' ? dates : day ? [day] : [];
   const single = day !== null && day !== 'all' ? day : null;
+  const dayNo = single ? dayNumbers.get(single)! : 0;
 
   const shots = useMemo(() => pdrShots(project, selected), [project, selected.join()]);
-  const orders = useMemo(
-    () =>
-      new Map(
-        selected.filter((d) => project.pdrOrder[d]).map((d) => [dayNumbers.get(d)!, project.pdrOrder[d]] as const),
-      ),
-    [project.pdrOrder, selected.join(), dayNumbers],
-  );
-  const rows = useMemo(() => sequencePdr(shots, project.pdr, orders), [shots, project.pdr, orders]);
+  const byDay = <T,>(src: Record<string, T>) =>
+    new Map(selected.filter((d) => src[d]).map((d) => [dayNumbers.get(d)!, src[d]] as const));
+  const orders = useMemo(() => byDay(project.pdrOrder), [project.pdrOrder, selected.join(), dayNumbers]);
+  const plans = useMemo(() => byDay(project.pdrPlan), [project.pdrPlan, selected.join(), dayNumbers]);
+  const rows = useMemo(() => sequencePdr(shots, project.pdr, orders, plans), [shots, project.pdr, orders, plans]);
+  const warnings = useMemo(() => planWarnings(rows), [rows]);
   const labels = pdrLabels(project.pdr.sheetLanguage);
   const [busy, setBusy] = useState(false);
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [dropAt, setDropAt] = useState<{ id: string; before: boolean } | null>(null);
+  const [dragKey, setDragKey] = useState<string | null>(null);
+  const [dropAt, setDropAt] = useState<{ key: string; before: boolean } | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [pending, setPending] = useState<PendingMove | null>(null);
   const templateInput = useRef<HTMLInputElement>(null);
   const exportMenu = useRef<HTMLDetailsElement>(null);
+  const addMenu = useRef<HTMLDetailsElement>(null);
+
+  useEffect(() => setPicked(new Set()), [day]);
 
   if (!dates.length)
     return (
       <div className="empty">
         <h2>No shooting days yet</h2>
         <p>
-          The shooting plan is built per shooting day. Drag scenes onto days in Schedule, then open a day's shooting plan
-          from its column. You can also start from a shot list.
+          The shooting plan is built per shooting day. Import a shot list, or drag scenes onto days in Schedule and open a
+          day's shooting plan from its column.
         </p>
         <div className="empty-actions">
-          <button className="primary" onClick={props.onGoToSchedule}>
-            Go to Schedule
+          <button className="primary" onClick={props.onImportShotList}>
+            Import shot list
           </button>
-          <button onClick={props.onImportShotList}>Import shot list</button>
+          <button onClick={props.onGoToSchedule}>Go to Schedule</button>
         </div>
       </div>
     );
 
+  // ---- The day as an editable list: plan items, each tied to the row it is shown in.
+  const planIdx = rows.map((r, i) => (isPlanRow(r) ? i : -1)).filter((i) => i >= 0);
+  const keyOf = (i: number) => rows[i].planId ?? rows[i].shot?.id ?? `${rows[i].kind}@${i}`;
+  const indexOfKey = (key: string) => planIdx.find((i) => keyOf(i) === key) ?? -1;
+  /** The day's rows as plan items, in order; a day still in the automatic order becomes a plan here. */
+  const currentItems = () => planFromRows(rows);
+  const itemAt = (items: PlanItem[], row: number) => items[planIdx.indexOf(row)];
+  const commit = (items: PlanItem[]) => {
+    if (!single) return;
+    dispatch({ type: 'setPdrPlan', date: single, items });
+    setPicked(new Set());
+  };
+  const isPlan = !!(single && project.pdrPlan[single]);
+  const isCustom = !!(single && (project.pdrPlan[single] || project.pdrOrder[single]));
+
   const info = () =>
     day === 'all'
       ? { subtitle: `${dates.length} shooting days · ${fmtDay(dates[0])} – ${fmtDay(dates[dates.length - 1])}`, fileTag: '' }
-      : { subtitle: `${labels.shootDay(dayNumbers.get(day!)!)} · ${fmtDay(day!)}`, fileTag: ` day ${dayNumbers.get(day!)}` };
+      : { subtitle: `${labels.shootDay(dayNo)} · ${fmtDay(day!)}`, fileTag: ` day ${dayNo}` };
 
   const runExport = async (fn: () => Promise<unknown>) => {
     exportMenu.current?.removeAttribute('open');
@@ -103,26 +151,189 @@ export default function PdrView(props: {
     }
   };
 
+  // ---- Editing
+  const setStart = (row: number, value: string) => {
+    const items = currentItems();
+    const item = itemAt(items, row);
+    if (!item) return;
+    if (value) item.at = toMinutes(value);
+    else delete item.at;
+    commit(items);
+  };
+
+  const setEnd = (row: number, value: string) => {
+    const r = rows[row];
+    if (!value || r.start === undefined) return;
+    const minutes = toMinutes(value) - r.start;
+    if (minutes <= 0) return;
+    // A shot's length belongs to the shot; other rows keep theirs in the plan.
+    if (r.shot && !r.shot.placeholder) return dispatch({ type: 'updateShot', id: r.shot.id, patch: { minutes } });
+    const items = currentItems();
+    const item = itemAt(items, row);
+    if (!item) return;
+    item.minutes = minutes;
+    commit(items);
+  };
+
+  const setLabel = (row: number, text: string) => {
+    const items = currentItems();
+    const item = itemAt(items, row);
+    if (!item) return;
+    if (text.trim()) item.label = text;
+    else delete item.label;
+    commit(items);
+  };
+
+  const addRow = (kind: PlanItemKind) => {
+    addMenu.current?.removeAttribute('open');
+    commit([...currentItems(), { id: uid(), kind, minutes: defaultMinutes(kind, project.pdr), ...(kind === 'break' ? { label: 'Break' } : {}) }]);
+  };
+
+  const remove = async (rowsToRemove: number[]) => {
+    const list = rowsToRemove.map((i) => rows[i]);
+    const shotsGone = list.filter((r) => r.shot && !r.shot.placeholder);
+    const scenesOff = list.filter((r) => r.shot?.placeholder);
+    if (
+      (list.length > 1 || scenesOff.length) &&
+      !(await askConfirm(
+        [
+          `Delete ${list.length === 1 ? 'this row' : `these ${list.length} rows`}?`,
+          shotsGone.length ? `${shotsGone.length} shot${shotsGone.length === 1 ? ' is' : 's are'} removed from the shot list.` : '',
+          scenesOff.length ? `${scenesOff.length} scene${scenesOff.length === 1 ? ' goes' : 's go'} back to Unscheduled.` : '',
+        ]
+          .filter(Boolean)
+          .join(' '),
+      ))
+    )
+      return;
+    const gone = new Set(rowsToRemove);
+    const items = currentItems().filter((_, k) => !gone.has(planIdx[k]));
+    for (const r of shotsGone) dispatch({ type: 'deleteShot', id: r.shot!.id });
+    for (const r of scenesOff) dispatch({ type: 'moveStrip', sheetId: r.shot!.sheetId, date: null });
+    if (single && (isPlan || list.some((r) => !r.shot))) commit(items);
+    else setPicked(new Set());
+  };
+
+  /** Works out what a move changes, and asks before doing it. */
+  const proposeMove = (dragged: string, target: string, before: boolean) => {
+    if (!single) return;
+    const moving = (picked.has(dragged) ? planIdx.filter((i) => picked.has(keyOf(i))) : [indexOfKey(dragged)]).filter((i) => i >= 0);
+    const targetRow = indexOfKey(target);
+    if (!moving.length || targetRow < 0 || moving.includes(targetRow)) return;
+    const items = currentItems();
+    const movingItems = moving.map((i) => ({ ...itemAt(items, i) }));
+    for (const m of movingItems) delete m.at; // a moved row starts where it lands
+    const targetItem = itemAt(items, targetRow);
+    const rest = items.filter((_, k) => !moving.includes(planIdx[k]));
+    rest.splice(rest.indexOf(targetItem) + (before ? 0 : 1), 0, ...movingItems);
+
+    const next = sequencePdr(shots, project.pdr, orders, new Map([...plans, [dayNo, rest]]));
+    const wrap = (rs: PdrRow[]) => rs.find((r) => r.kind === 'end')?.start;
+    const [was, now] = [wrap(rows), wrap(next)];
+    const lines: string[] = [];
+    if (was !== undefined && now !== undefined)
+      lines.push(was === now ? `The day still ends at ${fmtClock(now)}.` : `The day now ends at ${fmtClock(now)} (was ${fmtClock(was)}).`);
+    const lunchStart = (rs: PdrRow[]) => rs.find((r) => r.kind === 'lunch')?.start;
+    const [l1, l2] = [lunchStart(rows), lunchStart(next)];
+    if (l2 !== undefined && l1 !== l2) lines.push(`Lunch now starts at ${fmtClock(l2)}${l1 !== undefined ? ` (was ${fmtClock(l1)})` : ''}.`);
+    const afterLunch = (rs: PdrRow[], id: string) => {
+      const li = rs.findIndex((r) => r.kind === 'lunch');
+      const si = rs.findIndex((r) => r.shot?.id === id);
+      return li >= 0 && si > li;
+    };
+    for (const m of movingItems)
+      if (m.kind === 'shot' && afterLunch(rows, m.id) !== afterLunch(next, m.id)) {
+        const s = shots.find((x) => x.id === m.id);
+        lines.push(`Shot ${s?.number || '—'} is now ${afterLunch(next, m.id) ? 'after' : 'before'} lunch.`);
+      }
+    const old = new Set(warnings.map((w) => w.text));
+    const fresh = [...new Set(planWarnings(next).map((w) => w.text))].filter((t) => !old.has(t));
+    const what = moving.length === 1 ? (rows[moving[0]].shot ? `shot ${rows[moving[0]].shot!.number || '—'}` : 'this row') : `${moving.length} rows`;
+    setPending({ title: `Move ${what}?`, lines, warnings: fresh, items: rest });
+  };
+
+  const endDrag = () => {
+    setDragKey(null);
+    setDropAt(null);
+  };
+
+  const togglePick = (key: string) =>
+    setPicked((p) => {
+      const next = new Set(p);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
   const shotCount = shots.filter((s) => !s.placeholder).length;
   const withoutList = [...new Set(shots.filter((s) => s.placeholder).map((s) => s.number || '—'))];
   const last = rows[rows.length - 1];
   const showTalent = shots.some((s) => s.talent.length);
   const columns = showTalent ? 9 : 8;
   const set = (patch: Partial<PdrSettings>) => dispatch({ type: 'setPdr', patch });
+  const warningsAt = (i: number) => warnings.filter((w) => w.row === i).map((w) => w.text);
+  const pickedRows = planIdx.filter((i) => picked.has(keyOf(i)));
 
-  /** Moves a row before or after another one; from then on this day keeps the user's order. */
-  const reorder = (id: string, targetId: string, before: boolean) => {
-    if (!single || id === targetId) return;
-    const ids = rows.filter((r) => r.kind === 'shot').map((r) => r.shot!.id).filter((x) => x !== id);
-    ids.splice(ids.indexOf(targetId) + (before ? 0 : 1), 0, id);
-    dispatch({ type: 'setPdrOrder', date: single, ids });
+  /** Drag handle, checkbox and drop target shared by shot rows and the rows between them. */
+  const rowDnD = (i: number) => {
+    const key = keyOf(i);
+    return {
+      className: `${dropAt?.key === key ? (dropAt.before ? 'drop-before' : 'drop-after') : ''} ${
+        dragKey && (dragKey === key || (picked.has(dragKey) && picked.has(key))) ? 'dragging' : ''
+      } ${picked.has(key) ? 'picked' : ''}`,
+      onDragOver: (e: DragEvent<HTMLTableRowElement>) => {
+        if (!dragKey) return;
+        e.preventDefault();
+        const box = e.currentTarget.getBoundingClientRect();
+        setDropAt({ key, before: e.clientY - box.top < box.height / 2 });
+      },
+      onDrop: (e: DragEvent<HTMLTableRowElement>) => {
+        e.preventDefault();
+        if (dragKey && dropAt) proposeMove(dragKey, dropAt.key, dropAt.before);
+        endDrag();
+      },
+      handle: single && (
+        <span className="row-tools">
+          <input type="checkbox" checked={picked.has(key)} onChange={() => togglePick(key)} aria-label="Select row" />
+          <span
+            className="drag-handle"
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData('text/plain', key);
+              e.dataTransfer.effectAllowed = 'move';
+              setDragKey(key);
+            }}
+            onDragEnd={endDrag}
+            title={picked.has(key) && picked.size > 1 ? `Drag to move the ${picked.size} selected rows` : 'Drag to move this row'}
+          >
+            ⋮⋮
+          </span>
+        </span>
+      ),
+    };
   };
 
-  const remove = async (s: PdrShot) => {
-    if (!s.placeholder) return dispatch({ type: 'deleteShot', id: s.id });
-    const date = selected.find((d) => (project.schedule.byDate[d] ?? []).includes(s.sheetId));
-    if (date && (await askConfirm(`Take scene ${s.number || '—'} off this shooting day? It goes back to Unscheduled.`)))
-      dispatch({ type: 'moveStrip', sheetId: s.sheetId, date: null });
+  const timeCell = (i: number) => {
+    const r = rows[i];
+    const start = r.start ?? 0;
+    const end = r.end ?? start;
+    if (!single) return <td className="c-time">{timeText(r)}</td>;
+    return (
+      <td className="c-time">
+        <span className="time-range">
+          <input
+            type="time"
+            className={r.pinned ? 'pinned' : ''}
+            value={fmtClock(start)}
+            onChange={(e) => setStart(i, e.target.value)}
+            aria-label="Starts at"
+            title={r.pinned ? 'Fixed start time. Clear it to follow the row above again.' : 'Starts at (set a time to fix it)'}
+          />
+          –
+          <input type="time" value={fmtClock(end)} onChange={(e) => setEnd(i, e.target.value)} aria-label="Ends at" title="Ends at" />
+        </span>
+      </td>
+    );
   };
 
   return (
@@ -158,10 +369,25 @@ export default function PdrView(props: {
             Upload shot list for this day…
           </button>
         )}
-        {single && project.pdrOrder[single] && (
+        {single && (
+          <details className="menu" ref={addMenu}>
+            <summary>+ Add row ▾</summary>
+            <div className="menu-items">
+              {ADD_ROWS.map(([kind, label]) => (
+                <button key={kind} onClick={() => addRow(kind)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </details>
+        )}
+        {isCustom && (
           <button
-            onClick={() => dispatch({ type: 'setPdrOrder', date: single, ids: null })}
-            title="Forget the order you set and let the app order the shots again"
+            onClick={async () =>
+              (await askConfirm('Go back to the automatic order? Your order, added rows and fixed times for this day are lost.')) &&
+              dispatch({ type: 'setPdrPlan', date: single!, items: null })
+            }
+            title="Forget your own order and let the app order the day again"
           >
             Back to automatic order
           </button>
@@ -246,10 +472,22 @@ export default function PdrView(props: {
         </p>
       )}
 
+      {pickedRows.length > 0 && (
+        <div className="pick-bar" role="status">
+          {pickedRows.length} row{pickedRows.length === 1 ? '' : 's'} selected · drag any of them to move them together
+          <button className="danger" onClick={() => void remove(pickedRows)}>
+            Delete selected
+          </button>
+          <button className="ghost" onClick={() => setPicked(new Set())}>
+            Clear selection
+          </button>
+        </div>
+      )}
+
       <table className="pdr-table">
         <thead>
           <tr>
-            <th className="c-drag" aria-label="Order" />
+            <th className="c-drag" aria-label="Select and move" />
             <th className="c-time">Time</th>
             <th className="c-scene">Shot</th>
             <th className="c-desc">Description</th>
@@ -262,57 +500,67 @@ export default function PdrView(props: {
         </thead>
         <tbody>
           {rows.map((r, i) => {
-            if (r.kind !== 'shot') return <StructuralRow key={i} row={r} labels={labels} columns={columns} dispatch={dispatch} />;
-            const s = r.shot!;
-            const drop = dropAt?.id === s.id ? (dropAt.before ? 'drop-before' : 'drop-after') : '';
-            return (
-              <tr
-                key={s.id}
-                className={`pdr-shot ${s.keyShot ? 'key' : ''} ${s.placeholder ? 'placeholder' : ''} ${drop} ${dragId === s.id ? 'dragging' : ''}`}
-                onDragOver={(e: DragEvent<HTMLTableRowElement>) => {
-                  if (!dragId) return;
-                  e.preventDefault();
-                  const box = e.currentTarget.getBoundingClientRect();
-                  setDropAt({ id: s.id, before: e.clientY - box.top < box.height / 2 });
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  if (dragId && dropAt) reorder(dragId, s.id, dropAt.before);
-                  setDragId(null);
-                  setDropAt(null);
-                }}
-              >
-                <td className="c-drag">
-                  {single && (
-                    <span
-                      className="drag-handle"
-                      draggable
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData('text/plain', s.id);
-                        e.dataTransfer.effectAllowed = 'move';
-                        setDragId(s.id);
-                      }}
-                      onDragEnd={() => {
-                        setDragId(null);
-                        setDropAt(null);
-                      }}
-                      title="Drag to change the order"
-                    >
-                      ⋮⋮
-                    </span>
-                  )}
-                </td>
-                <ShotCells row={r} shot={s} showTalent={showTalent} dispatch={dispatch} defaultMinutes={project.pdr.shotMinutes} />
-                <td className="c-del">
+            const rowWarnings = warningsAt(i);
+            if (!isPlanRow(r))
+              return (
+                <tr key={`${r.kind}-${i}`} className={`pdr-${r.kind}`}>
+                  <td className="c-drag" />
+                  <td className="c-time">{r.kind === 'end' || r.kind === 'daySep' ? '' : timeText(r)}</td>
+                  <td colSpan={columns - 2}>{rowLabel(r, labels)}</td>
+                </tr>
+              );
+            const dnd = rowDnD(i);
+            const del = (
+              <td className="c-del">
+                {single && (
                   <button
                     className="ghost del"
-                    onClick={() => void remove(s)}
-                    title={s.placeholder ? 'Take this scene off the day' : 'Delete this shot'}
+                    onClick={() => void remove([i])}
+                    title={r.shot?.placeholder ? 'Take this scene off the day' : 'Delete this row'}
                     aria-label="Delete row"
                   >
                     ×
                   </button>
-                </td>
+                )}
+              </td>
+            );
+            if (!r.shot)
+              return (
+                <tr key={keyOf(i)} className={`pdr-${r.kind} pdr-gap ${dnd.className}`} onDragOver={dnd.onDragOver} onDrop={dnd.onDrop}>
+                  <td className="c-drag">{dnd.handle}</td>
+                  {timeCell(i)}
+                  <td colSpan={columns - 3}>
+                    {single ? (
+                      <input
+                        className="gap-label"
+                        value={rowLabel(r, labels)}
+                        onChange={(e) => setLabel(i, e.target.value)}
+                        aria-label="Row name"
+                      />
+                    ) : (
+                      rowLabel(r, labels)
+                    )}
+                    {rowWarnings.map((w) => (
+                      <div key={w} className="row-warning">
+                        ⚠ {w}
+                      </div>
+                    ))}
+                  </td>
+                  {del}
+                </tr>
+              );
+            const s = r.shot;
+            return (
+              <tr
+                key={keyOf(i)}
+                className={`pdr-shot ${s.keyShot ? 'key' : ''} ${s.placeholder ? 'placeholder' : ''} ${dnd.className}`}
+                onDragOver={dnd.onDragOver}
+                onDrop={dnd.onDrop}
+              >
+                <td className="c-drag">{dnd.handle}</td>
+                {timeCell(i)}
+                <ShotCells shot={s} showTalent={showTalent} dispatch={dispatch} warnings={rowWarnings} />
+                {del}
               </tr>
             );
           })}
@@ -320,79 +568,63 @@ export default function PdrView(props: {
       </table>
       <p className="hint">
         {single
-          ? project.pdrOrder[single]
-            ? 'You set the order of this day. Times follow it; resets and company moves are added when the setup or location changes. '
-            : 'Shots are ordered by production logic: one location at a time, full-cast masters first, then each character closing in, inserts before leaving the location and field / product shots after lunch. Drag a row by ⋮⋮ to set your own order. '
-          : 'Pick a single day to change the order of its shots. '}
-        Edit the end time of a shot to change how long it takes. ⭐ marks a key shot.
+          ? isPlan
+            ? 'This day follows your own layout: rows run in the order you set, and nothing is added for you. ⚠ marks a possible problem. '
+            : 'Shots are ordered by production logic: one location at a time, full-cast masters first, then each character closing in, inserts before leaving the location and field / product shots after lunch. '
+          : 'Pick a single day to move, add or retime rows. '}
+        {single &&
+          'Drag rows by ⋮⋮, or tick several and drag one of them to move them together. Change a start time to fix it, or an end time to change how long a row takes. '}
+        ⭐ marks a key shot.
       </p>
+
+      {pending && (
+        <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && setPending(null)}>
+          <div className="modal" role="dialog" aria-labelledby="move-title">
+            <h3 id="move-title">{pending.title}</h3>
+            {pending.lines.map((l) => (
+              <p key={l} className="modal-text">
+                {l}
+              </p>
+            ))}
+            {pending.warnings.length > 0 ? (
+              <div className="move-warnings">
+                <b>Check before moving:</b>
+                <ul>
+                  {pending.warnings.map((w) => (
+                    <li key={w}>{w}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p className="modal-text small">No problems found with the new order.</p>
+            )}
+            <div className="modal-actions">
+              <span className="spacer" />
+              <button onClick={() => setPending(null)}>Cancel</button>
+              <button
+                className="primary"
+                autoFocus
+                onClick={() => {
+                  commit(pending.items);
+                  setPending(null);
+                }}
+              >
+                Move
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function StructuralRow(props: { row: PdrRow; labels: ReturnType<typeof pdrLabels>; columns: number; dispatch: Dispatch<Action> }) {
-  const { row, labels, columns, dispatch } = props;
-  const next = row.next;
-  const editable = (row.kind === 'reset' || row.kind === 'move') && next && !next.placeholder;
-  return (
-    <tr className={`pdr-${row.kind}`}>
-      <td className="c-drag" />
-      <td className="c-time">{row.kind === 'end' || row.kind === 'daySep' ? '' : timeText(row)}</td>
-      <td colSpan={columns - 2}>
-        {rowLabel(row, labels)}
-        {editable && (
-          <span className="gap-edit">
-            <input
-              type="number"
-              min={0}
-              step={5}
-              value={(row.end ?? 0) - (row.start ?? 0)}
-              onChange={(e) =>
-                dispatch({ type: 'updateShot', id: next.id, patch: { gapMinutes: Math.max(0, Math.round(Number(e.target.value) || 0)) } })
-              }
-              aria-label="Minutes"
-            />
-            min
-          </span>
-        )}
-      </td>
-    </tr>
-  );
-}
-
-function ShotCells(props: {
-  row: PdrRow;
-  shot: PdrShot;
-  showTalent: boolean;
-  dispatch: Dispatch<Action>;
-  defaultMinutes: number;
-}) {
-  const { row, shot: s, dispatch } = props;
+function ShotCells(props: { shot: PdrShot; showTalent: boolean; dispatch: Dispatch<Action>; warnings: string[] }) {
+  const { shot: s, dispatch } = props;
   const update = (patch: Partial<Shot>) => dispatch({ type: 'updateShot', id: s.id, patch });
-  const start = row.start ?? 0;
   const notes = [...s.alerts, s.notes].filter(Boolean).join('\n');
   return (
     <>
-      <td className="c-time">
-        <span className="time-range">
-          {fmtClock(start)} –
-          {s.placeholder ? (
-            <span> {fmtClock(row.end ?? start)}</span>
-          ) : (
-            <input
-              type="time"
-              value={fmtClock(row.end ?? start)}
-              onChange={(e) => {
-                if (!e.target.value) return;
-                const minutes = toMinutes(e.target.value) - start;
-                if (minutes > 0) update({ minutes });
-              }}
-              aria-label="Ends at"
-              title={`Ends at (default length ${props.defaultMinutes} min)`}
-            />
-          )}
-        </span>
-      </td>
       <td className="c-scene">
         <b>{s.number || '—'}</b>
         {s.location && <div className="muted">{s.location}</div>}
@@ -410,6 +642,11 @@ function ShotCells(props: {
           }
           aria-label="Description"
         />
+        {props.warnings.map((w) => (
+          <div key={w} className="row-warning">
+            ⚠ {w}
+          </div>
+        ))}
       </td>
       {props.showTalent && <td className="c-talent">{s.talent.join(', ')}</td>}
       <td className="c-type">

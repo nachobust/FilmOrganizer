@@ -1118,12 +1118,12 @@ p.form-error {
   white-space: pre-line;
 }
 .pdr-table .c-drag {
-  width: 22px;
+  width: 40px;
   padding: 4px 0;
   text-align: center;
 }
 .pdr-table .c-time {
-  width: 128px;
+  width: 140px;
   white-space: nowrap;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -1336,4 +1336,78 @@ button.del:hover:not(:disabled) {
   border: 1px solid var(--border-strong);
   border-radius: 6px;
   background: var(--panel);
+}
+
+/* No clock button in time boxes: the time is typed. */
+input[type='time']::-webkit-calendar-picker-indicator {
+  display: none;
+}
+.pdr-table .time-range input[type='time'] {
+  width: 56px;
+}
+.pdr-table .time-range input.pinned {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.row-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+.row-tools input[type='checkbox'] {
+  margin: 0 2px;
+}
+.pdr-table tr.picked td {
+  box-shadow: inset 0 0 0 9999px rgba(37, 99, 235, 0.08);
+}
+.pdr-gap td {
+  vertical-align: middle;
+}
+.gap-label {
+  width: 100%;
+  font: inherit;
+  font-weight: 700;
+  text-align: center;
+  color: inherit;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+}
+.gap-label:hover {
+  border-color: rgba(0, 0, 0, 0.18);
+}
+.gap-label:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--panel);
+}
+.row-warning {
+  margin-top: 3px;
+  color: var(--warn);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: left;
+}
+.pick-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1e40af;
+}
+.move-warnings {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #fff7ed;
+  color: var(--warn);
+}
+.move-warnings ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
 }
