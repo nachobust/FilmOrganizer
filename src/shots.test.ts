@@ -68,12 +68,14 @@ describe('scenes from shot lists', () => {
   );
 
   it('a new project gets one scene per scene number, with cast confirmed', () => {
-    const p = projectFromShotList('Test', parsed);
+    const p = projectFromShotList('Test', parsed, '2026-11-03');
     expect(p.sheets.map((s) => [s.scenes, s.set, s.intExt])).toEqual([
       ['1', 'KITCHEN', 'INT'],
       ['2', 'STREET', 'EXT'],
     ]);
     expect(p.shots.filter((s) => s.sheetId === p.sheets[0].id)).toHaveLength(2);
+    // A shot list is a shoot: its scenes are already on the shooting day.
+    expect(p.schedule.byDate['2026-11-03']).toEqual(p.sheets.map((s) => s.id));
     const cast = p.elements.find((e) => e.name === 'ANA')!;
     expect(p.sheets[0].tags.find((t) => t.elementId === cast.id)?.state).toBe('confirmed');
   });

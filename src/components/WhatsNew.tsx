@@ -8,7 +8,7 @@ export const WHATS_NEW = {
   id: '0.2.1',
   title: 'New: shot lists and an editable shooting plan',
   items: [
-    ['Import a shot list', 'Start a project from a shot list (Excel, or a table in Word or text) instead of a script. English and Spanish column names both work.'],
+    ['Import a shot list', 'Start from a shot list (Excel, or a table in Word or text) instead of a script: it opens straight as that day’s shooting plan. English and Spanish column names both work.'],
     ['A shot list per shooting day', 'On the stripboard, each day has a “+ Shot list” button: add that day’s shots and go straight to its shooting plan.'],
     ['Shooting plan', 'Each shooting day becomes a timed plan: call, prep, one location at a time, masters first, inserts before lunch, product shots after. Edit descriptions and times, drag rows into your own order or delete them, and the day re-times itself.'],
     ['Export to Excel', 'As an Excel sheet, or straight into your own template. Sheet labels in English or Spanish.'],
