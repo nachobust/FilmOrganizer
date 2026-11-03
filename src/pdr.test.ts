@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_PDR, type ShotCategory, type ShotType } from './model';
-import { fmtClock, sequencePdr, toMinutes, type PdrRow, type PdrShot } from './pdr';
+import { DEFAULT_PDR, type PlanItem, type ShotCategory, type ShotType } from './model';
+import { fmtClock, planFromRows, planWarnings, sequencePdr, toMinutes, type PdrRow, type PdrShot } from './pdr';
 
 let n = 0;
 function shot(
@@ -213,5 +213,54 @@ describe('sequencePdr: order set by hand', () => {
     const move = sequencePdr(moved, { ...cfg, lunchAt: '23:00' }).find((r) => r.kind === 'move')!;
     expect(move.end! - move.start!).toBe(5);
     expect(move.next?.number).toBe('3');
+  });
+});
+
+describe('sequencePdr: a day laid out by the user', () => {
+  const a = shot('1', ['A'], 'ws', { location: 'Porch', minutes: 30 });
+  const b = shot('2', ['A'], 'ws', { location: 'Kitchen', minutes: 30 });
+  const cfg = { ...DEFAULT_PDR, lunchAt: '23:00' };
+
+  it('turning the automatic rows into a plan changes nothing', () => {
+    const auto = sequencePdr([a, b], cfg);
+    const plan = planFromRows(auto);
+    const laid = sequencePdr([a, b], cfg, new Map(), new Map([[1, plan]]));
+    expect(laid.map((r) => [r.kind, r.start, r.end])).toEqual(auto.map((r) => [r.kind, r.start, r.end]));
+  });
+
+  it('runs the rows in the given order with their own lengths, labels and fixed starts', () => {
+    const plan: PlanItem[] = [
+      { id: b.id, kind: 'shot' },
+      { id: 'g1', kind: 'break', minutes: 15, label: 'Coffee' },
+      { id: a.id, kind: 'shot', at: toMinutes('12:00') },
+    ];
+    const rows = sequencePdr([a, b], cfg, new Map(), new Map([[1, plan]]));
+    expect(rows.map((r) => r.kind)).toEqual(['call', 'prep', 'shot', 'break', 'shot', 'wrap', 'end']);
+    expect(rows[3]).toMatchObject({ label: 'Coffee', start: toMinutes('10:30'), end: toMinutes('10:45') });
+    expect(rows[4]).toMatchObject({ start: toMinutes('12:00'), pinned: true });
+  });
+
+  it('warns about a location change without a company move, and about overlapping times', () => {
+    const plan: PlanItem[] = [
+      { id: a.id, kind: 'shot' },
+      { id: b.id, kind: 'shot', at: toMinutes('10:10') },
+    ];
+    const texts = planWarnings(sequencePdr([a, b], cfg, new Map(), new Map([[1, plan]]))).map((w) => w.text);
+    expect(texts).toEqual([
+      'Starts at 10:10, before the row above ends (10:30).',
+      'No company move between Porch and Kitchen.',
+    ]);
+  });
+
+  it('a company move is named after the locations around it, and shots added later go at the end', () => {
+    const c = shot('3', ['A'], 'ms', { location: 'Kitchen' });
+    const plan: PlanItem[] = [
+      { id: a.id, kind: 'shot' },
+      { id: 'm', kind: 'move', minutes: 20 },
+      { id: b.id, kind: 'shot' },
+    ];
+    const rows = sequencePdr([a, b, c], cfg, new Map(), new Map([[1, plan]]));
+    expect(rows.find((r) => r.kind === 'move')).toMatchObject({ from: 'Porch', to: 'Kitchen' });
+    expect(numbers(rows)).toEqual(['1', '2', '3']);
   });
 });
