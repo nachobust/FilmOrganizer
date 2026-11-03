@@ -18,6 +18,8 @@ import type { Project } from '../model';
 import type { Suggestion } from '../rules';
 
 const IDS = Object.keys(PROVIDERS) as ProviderId[];
+/** Value of the "Type a name…" entry in the model list. */
+const TYPE_OWN = '__type-own__';
 
 export function AISettingsModal(props: { settings: AISettings; onSave: (s: AISettings) => void; onClose: () => void }) {
   const [provider, setProvider] = useState<ProviderId | null>(props.settings.provider);
@@ -27,9 +29,12 @@ export function AISettingsModal(props: { settings: AISettings; onSave: (s: AISet
   const [models, setModels] = useState<string[]>([]);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [testing, setTesting] = useState(false);
+  /** Typing a model name by hand instead of picking one from the loaded list. */
+  const [typing, setTyping] = useState(false);
   useEffect(() => {
     setModels([]);
     setStatus(null);
+    setTyping(false);
   }, [provider]);
 
   const info = provider ? PROVIDERS[provider] : null;
@@ -129,21 +134,38 @@ export function AISettingsModal(props: { settings: AISettings; onSave: (s: AISet
             <div className="field-row end">
               <label>
                 Model
-                <input
-                  value={cfg.model}
-                  list="dl-ai-models"
-                  onChange={(e) => set({ model: e.target.value })}
-                  spellCheck={false}
-                />
-                <datalist id="dl-ai-models">
-                  {models.map((m) => (
-                    <option key={m} value={m} />
-                  ))}
-                </datalist>
+                {models.length && !typing ? (
+                  // Once the models are loaded, every one of them stays in the list, whichever is chosen.
+                  <select
+                    value={models.includes(cfg.model) ? cfg.model : ''}
+                    onChange={(e) => (e.target.value === TYPE_OWN ? setTyping(true) : set({ model: e.target.value }))}
+                  >
+                    {!models.includes(cfg.model) && <option value="">{cfg.model || 'Choose a model'}</option>}
+                    {models.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                    <option value={TYPE_OWN}>Type a name…</option>
+                  </select>
+                ) : (
+                  <input
+                    value={cfg.model}
+                    onChange={(e) => set({ model: e.target.value })}
+                    placeholder={models.length ? 'Model name' : 'Test to load the list, or type a name'}
+                    spellCheck={false}
+                  />
+                )}
               </label>
-              <button type="button" onClick={test} disabled={testing}>
-                {testing ? 'Connecting…' : 'Test & load models'}
-              </button>
+              {models.length > 0 && typing ? (
+                <button type="button" onClick={() => setTyping(false)}>
+                  Pick from list
+                </button>
+              ) : (
+                <button type="button" onClick={test} disabled={testing}>
+                  {testing ? 'Connecting…' : models.length ? 'Reload models' : 'Test & load models'}
+                </button>
+              )}
             </div>
             {status && <div className={status.ok ? 'form-ok' : 'form-error'}>{status.text}</div>}
             <p className="modal-text small">
