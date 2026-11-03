@@ -2,8 +2,11 @@
 // and turning those shots into scenes, either as a new project or for one shooting day.
 
 import {
+  addDays,
+  fromISO,
   newProject,
   newSheet,
+  toISO,
   uid,
   type Project,
   type Sheet,
@@ -20,6 +23,8 @@ export interface ParsedShot extends Omit<Shot, 'id' | 'sheetId'> {
   scene: string;
   intExt: string;
   dayNight: string;
+  /** Shooting day from a Day column (1 = first day); null when the list has none. */
+  day: number | null;
 }
 
 // ---------------------------------------------------------------- Shot types
@@ -231,6 +236,7 @@ export function parseShotRows(rows: string[][]): ParsedShot[] {
       setup: cell('setup'),
       intExt: intExt.replace(/\./g, ''),
       dayNight: cell('dayNight').toUpperCase(),
+      day: Number(cell('day').match(/\d+/)?.[0]) || null,
     });
   }
   return shots;
@@ -398,13 +404,22 @@ function tagTalent(p: Project, sheetId: string, shots: ParsedShot[]): Project {
   return p;
 }
 
-/** A new project from a shot list: one scene per scene number, each with its shots. */
-export function projectFromShotList(title: string, shots: ParsedShot[]): Project {
+/**
+ * A new project from a shot list: one scene per scene number, each with its shots. A shot list is
+ * a shoot, so its scenes go straight onto shooting days: day 1 is `firstDate`, and a Day column
+ * ("Día 2") puts a scene that many days later.
+ */
+export function projectFromShotList(title: string, shots: ParsedShot[], firstDate: string): Project {
   let p = newProject(title);
   const groups = groupByScene(shots);
   p.sheets = groups.map((g, i) => sheetFromShots(g, String(i + 1), String(i + 1)));
   p.shots = groups.flatMap((g, i) => g.map((s) => toShot(s, p.sheets[i].id)));
   groups.forEach((g, i) => (p = tagTalent(p, p.sheets[i].id, g)));
+  const start = fromISO(firstDate);
+  groups.forEach((g, i) => {
+    const day = Math.min(...g.map((s) => s.day ?? 1));
+    p = reducer(p, { type: 'moveStrip', sheetId: p.sheets[i].id, date: toISO(addDays(start, day - 1)), beforeId: null });
+  });
   return runRules(p).project;
 }
 

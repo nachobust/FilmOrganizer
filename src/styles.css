@@ -1321,3 +1321,19 @@ button.del:hover:not(:disabled) {
     overflow: hidden;
   }
 }
+.shoot-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.shoot-date input {
+  font: inherit;
+  color: var(--text);
+  padding: 4px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--panel);
+}

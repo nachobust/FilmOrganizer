@@ -137,6 +137,23 @@ export default function PdrView(props: {
           <option value="all">All shooting days</option>
         </select>
         {single && (
+          <label className="shoot-date" title="Moves this whole shooting day to another date">
+            Shoot date
+            <input
+              type="date"
+              value={single}
+              onChange={async (e) => {
+                const to = e.target.value;
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(to) || to === single) return;
+                if (project.schedule.byDate[to]?.length && !(await askConfirm(`${fmtDay(to)} already has scenes. Add this day's scenes after them?`)))
+                  return;
+                dispatch({ type: 'moveDay', from: single, to });
+                props.setDay(to);
+              }}
+            />
+          </label>
+        )}
+        {single && (
           <button onClick={() => props.onUploadForDay(single)} title={`Accepts ${SHOT_LIST_ACCEPT.replace(/,/g, ', ')}`}>
             Upload shot list for this day…
           </button>
