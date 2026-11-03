@@ -1,5 +1,5 @@
-// PDR Excel export: the sequenced rows written either into FilmOrganizer's own PDR layout,
-// or into a copy of the user's PDR template (header and call sheet left as they are).
+// Shooting plan Excel export: the sequenced rows written either into FilmOrganizer's own layout,
+// or into a copy of the user's own template (header and call sheet left as they are).
 
 import type { Cell, Worksheet } from 'exceljs';
 import { SHOT_TYPES, type PdrSettings, type Project } from './model';
@@ -185,13 +185,13 @@ export interface PdrExportInfo {
 const baseName = (p: Project) => (p.title.trim() || 'Untitled').replace(/[\\/:*?"<>|]+/g, '-');
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-/** FilmOrganizer's own PDR sheet: title, day line, column headers, then the schedule. */
+/** FilmOrganizer's own shooting plan sheet: title, day line, column headers, then the schedule. */
 export async function exportPdrXLSX(p: Project, rows: PdrRow[], info: PdrExportInfo) {
   const { default: ExcelJS } = await import('exceljs');
   const wb = new ExcelJS.Workbook();
   wb.creator = 'FilmOrganizer';
-  wb.title = `${p.title} PDR`;
-  const ws = wb.addWorksheet('PDR', {
+  wb.title = `${p.title} shooting plan`;
+  const ws = wb.addWorksheet('Shooting plan', {
     views: [{ state: 'frozen', ySplit: 4 }],
     pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 },
   });
@@ -212,7 +212,7 @@ export async function exportPdrXLSX(p: Project, rows: PdrRow[], info: PdrExportI
 
   writeRows(ws, rows, 5, OWN_LAYOUT, p.pdr);
   const buf = await wb.xlsx.writeBuffer();
-  return saveFile(`${baseName(p)} PDR${info.fileTag}.xlsx`, buf, XLSX_TYPE);
+  return saveFile(`${baseName(p)} shooting plan${info.fileTag}.xlsx`, buf, XLSX_TYPE);
 }
 
 /** The header row is the first one with a TIME / HORAS or SCENE / ESCENA heading. */
@@ -226,7 +226,7 @@ function findHeaderRow(ws: Worksheet): number | null {
 }
 
 /**
- * Writes the schedule into a copy of the user's own PDR template: everything above the column
+ * Writes the schedule into a copy of the user's own template: everything above the column
  * headers (title, call sheet) is kept, everything below is replaced. The template needs the
  * PDR layout: TIME in A:B, then SCENE, DESCRIPTION, TALENT, SHOT, REFERENCE (G:H), NOTES (I).
  */
@@ -265,5 +265,5 @@ export async function exportPdrIntoTemplate(p: Project, rows: PdrRow[], info: Pd
 
   writeRows(ws, rows, first, TEMPLATE_LAYOUT, p.pdr);
   const buf = await wb.xlsx.writeBuffer();
-  return saveFile(`${baseName(p)} PDR${info.fileTag}.xlsx`, buf, XLSX_TYPE);
+  return saveFile(`${baseName(p)} shooting plan${info.fileTag}.xlsx`, buf, XLSX_TYPE);
 }

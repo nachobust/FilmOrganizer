@@ -118,9 +118,11 @@ export interface Shot {
   /** A change of location is a company move; a change of setup inside it is a reset. */
   location: string;
   setup: string;
+  /** Minutes of the reset or company move before this shot, when the user changed it. */
+  gapMinutes?: number | null;
 }
 
-/** Day timings used to build the PDR (durations in minutes, clock times as "HH:MM"). */
+/** Day timings used to build the shooting plan (durations in minutes, clock times as "HH:MM"). */
 export interface PdrSettings {
   callTime: string;
   prepMinutes: number;
@@ -130,7 +132,7 @@ export interface PdrSettings {
   moveMinutes: number;
   wrapMinutes: number;
   shotMinutes: number;
-  /** Language of the labels written into the PDR sheet; the app itself stays in English. */
+  /** Language of the labels written into the exported sheet; the app itself stays in English. */
   sheetLanguage: 'en' | 'es';
 }
 
@@ -156,6 +158,11 @@ export interface Project {
   /** Shot lists, linked to scenes. Projects saved before shot lists existed have none. */
   shots: Shot[];
   pdr: PdrSettings;
+  /**
+   * Shooting plan rows the user dragged into their own order, per date ("YYYY-MM-DD"): shot ids
+   * (or "scene-<sheet id>" for a scene without a shot list). Days not listed use the automatic order.
+   */
+  pdrOrder: Record<string, string[]>;
 }
 
 export const GROUP_LABELS: Record<CategoryGroup, string> = {
@@ -231,6 +238,7 @@ export function newProject(title: string): Project {
     schedule: newSchedule(),
     shots: [],
     pdr: { ...DEFAULT_PDR },
+    pdrOrder: {},
   };
 }
 

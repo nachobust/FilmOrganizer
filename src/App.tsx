@@ -144,7 +144,7 @@ export default function App() {
     shotListInput.current?.click();
   };
 
-  /** A shot list starts a new project, or (with a date) fills in that shooting day and opens its PDR. */
+  /** A shot list starts a new project, or (with a date) fills in that shooting day and opens its shooting plan. */
   const openShotList = async (file: File, date: string | null) => {
     try {
       const shots = await readShotListFile(file);
@@ -155,7 +155,7 @@ export default function App() {
         setTab('schedule');
         setNav({ mode: 'week', date: toISO(new Date()) });
         setNotice(
-          `Imported ${plural(shots.length, 'shot')} in ${plural(next.sheets.length, 'scene')}. Drag scenes onto shooting days, then click PDR on a day to get its shooting plan.`,
+          `Imported ${plural(shots.length, 'shot')} in ${plural(next.sheets.length, 'scene')}. Drag scenes onto shooting days, then click Shooting plan on a day.`,
         );
         return;
       }
@@ -273,7 +273,7 @@ export default function App() {
             Schedule
           </button>
           <button className={tab === 'pdr' ? 'active' : ''} onClick={() => setTab('pdr')} title="Shooting plan per day">
-            PDR
+            Shooting plan
           </button>
         </nav>
         <span className="spacer" />
@@ -448,7 +448,7 @@ export default function App() {
               setTab('breakdown');
             }}
             onOpenPdr={(date) => {
-              // A day without any shots asks for its shot list first; otherwise straight to its PDR.
+              // A day without any shots asks for its shot list first; otherwise straight to its shooting plan.
               const ids = new Set(project.schedule.byDate[date] ?? []);
               if (!project.shots.some((s) => ids.has(s.sheetId))) return pickShotList(date);
               setPdrDay(date);
@@ -461,7 +461,7 @@ export default function App() {
               <div className="empty">
                 <h2>Start a breakdown</h2>
                 <p>Import a screenplay (PDF, Word .docx, Final Draft .fdx, Fountain or plain text) and every scene becomes a row you can break down. A creative brief or treatment without scene headings can be broken down into scenes with AI.</p>
-                <p>Already have a shot list? Import it instead (Excel, or a table in Word or text): its shots are grouped into scenes for the stripboard, and each shooting day gets a PDR.</p>
+                <p>Already have a shot list? Import it instead (Excel, or a table in Word or text): its shots are grouped into scenes for the stripboard, and each shooting day gets a shooting plan you can edit and export to Excel.</p>
                 <div className="empty-actions">
                   <button className="primary" onClick={() => scriptInput.current?.click()}>
                     Import script

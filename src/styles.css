@@ -1095,7 +1095,8 @@ p.form-error {
 }
 .pdr-table {
   width: 100%;
-  min-width: 980px;
+  min-width: 1080px;
+  table-layout: fixed;
   border-collapse: collapse;
   background: var(--panel);
   font-size: 12.5px;
@@ -1105,37 +1106,47 @@ p.form-error {
   color: #fff;
   text-align: left;
   font-size: 11.5px;
-  padding: 7px 8px;
+  padding: 6px 6px;
   position: sticky;
   top: 0;
   z-index: 1;
 }
 .pdr-table td {
   border: 1px solid var(--border);
-  padding: 6px 8px;
+  padding: 4px 6px;
   vertical-align: top;
   white-space: pre-line;
 }
+.pdr-table .c-drag {
+  width: 22px;
+  padding: 4px 0;
+  text-align: center;
+}
 .pdr-table .c-time {
-  width: 104px;
+  width: 128px;
   white-space: nowrap;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 .pdr-table .c-scene {
-  width: 120px;
+  width: 110px;
 }
 .pdr-table .c-talent {
-  width: 150px;
+  width: 120px;
 }
 .pdr-table .c-type {
-  width: 118px;
+  width: 116px;
 }
 .pdr-table .c-cat {
-  width: 124px;
+  width: 118px;
 }
-.pdr-table .c-min {
-  width: 64px;
+.pdr-table .c-notes {
+  width: 20%;
+}
+.pdr-table .c-del {
+  width: 28px;
+  padding: 2px;
+  text-align: center;
 }
 .pdr-table td select,
 .pdr-table td input {
@@ -1234,4 +1245,79 @@ button.star.on {
 }
 .whats-new li {
   margin-bottom: 8px;
+}
+
+.time-range {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.pdr-table .time-range input[type='time'] {
+  font-weight: 700;
+  padding: 1px 2px;
+  width: 78px;
+}
+.cell-text {
+  width: 100%;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: inherit;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  resize: vertical;
+}
+.cell-text:hover {
+  border-color: var(--border);
+}
+.cell-text:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--panel);
+}
+.alert-text {
+  color: #c00000;
+  font-weight: 700;
+}
+.drag-handle {
+  cursor: grab;
+  color: var(--muted);
+  user-select: none;
+  letter-spacing: -2px;
+  padding: 0 4px;
+}
+.pdr-shot.dragging td {
+  opacity: 0.4;
+}
+.pdr-shot.drop-before td {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+.pdr-shot.drop-after td {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+button.del {
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+}
+button.del:hover:not(:disabled) {
+  color: var(--danger);
+}
+.gap-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 10px;
+  font-weight: 400;
+}
+
+/* Text boxes grow with their text where the browser can do it. */
+@supports (field-sizing: content) {
+  .cell-text {
+    field-sizing: content;
+    overflow: hidden;
+  }
 }

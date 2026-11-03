@@ -94,3 +94,31 @@ describe('scenes from shot lists', () => {
     expect(attachShotList(project, parsed, '2026-11-03').project.shots).toHaveLength(3);
   });
 });
+
+describe('Spanish shot lists', () => {
+  it('reads accented, bracketed and reworded headers, and skips numbered empty rows', () => {
+    const shots = parseShotRows(
+      rowsFromText(
+        [
+          'Plano\tLocalización\tDescripción del plano\tTamaño de plano\tActores\tDuración (min)\tDuración (seg)\tObservaciones',
+          '1\tCocina\tJepser sirve café\tPM\tJepser\t15\t4\tLuz natural',
+          '2\tCalle\tJepser pega un póster\tPG\t\t\t6\t',
+          '3\t\t\t\t\t\t\t',
+          '4\t\t\t\t\t\t\t',
+        ].join('\n'),
+      ),
+    );
+    expect(shots).toHaveLength(2);
+    expect(shots[0]).toMatchObject({
+      number: '1',
+      location: 'Cocina',
+      description: 'Jepser sirve café',
+      type: 'ms',
+      talent: ['Jepser'],
+      minutes: 15,
+      notes: 'Luz natural',
+    });
+    // The seconds column is screen time, not shooting time.
+    expect(shots[1].minutes).toBeNull();
+  });
+});
