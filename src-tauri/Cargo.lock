@@ -790,6 +790,7 @@ dependencies = [
 name = "filmorganizer"
 version = "0.2.2"
 dependencies = [
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
