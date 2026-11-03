@@ -13,6 +13,7 @@ const LABELS = {
     reset: 'Reset: camera and lights',
     move: (from: string, to: string) => `Company move: ${from} → ${to}`,
     lunch: 'LUNCH',
+    break: 'Break',
     wrap: 'WRAP',
     end: 'END OF DAY',
     day: (n: number) => `DAY ${n}`,
@@ -25,6 +26,7 @@ const LABELS = {
     reset: 'Reset — recolocación cámara y luz',
     move: (from: string, to: string) => `Company move — ${from} → ${to}`,
     lunch: 'COMIDA',
+    break: 'Pausa',
     wrap: 'WRAP',
     end: 'END OF THE DAY',
     day: (n: number) => `DÍA ${n}`,
@@ -37,6 +39,7 @@ export const pdrLabels = (lang: PdrSettings['sheetLanguage']): PdrLabels => LABE
 
 /** The label shown in a structural row's text cell. */
 export function rowLabel(r: PdrRow, L: PdrLabels): string {
+  if (r.label) return r.label;
   switch (r.kind) {
     case 'call':
       return L.call;
@@ -48,6 +51,8 @@ export function rowLabel(r: PdrRow, L: PdrLabels): string {
       return L.move(r.from || '—', r.to || '—');
     case 'lunch':
       return L.lunch;
+    case 'break':
+      return L.break;
     case 'wrap':
       return L.wrap;
     case 'end':

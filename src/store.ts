@@ -5,6 +5,8 @@ import {
   uid,
   type BreakdownElement,
   type PdrSettings,
+  type PlanItem,
+  type PlanItemKind,
   type Project,
   type Sheet,
   type Shot,
@@ -52,7 +54,9 @@ export type Action =
   | { type: 'deleteShot'; id: string }
   | { type: 'setPdr'; patch: Partial<PdrSettings> }
   /** ids null = back to the automatic order for that date. */
-  | { type: 'setPdrOrder'; date: string; ids: string[] | null };
+  | { type: 'setPdrOrder'; date: string; ids: string[] | null }
+  /** items null = back to the automatic order for that date (also forgets a dragged order). */
+  | { type: 'setPdrPlan'; date: string; items: PlanItem[] | null };
 
 const normalizeName = (categoryId: string, name: string) => {
   const n = name.trim().replace(/\s+/g, ' ');
@@ -128,7 +132,10 @@ export function reducer(p: Project, a: Action): Project {
       const pdrOrder = { ...p.pdrOrder };
       if (pdrOrder[a.from]) pdrOrder[a.to] = [...(pdrOrder[a.to] ?? []), ...pdrOrder[a.from]];
       delete pdrOrder[a.from];
-      return { ...p, schedule: { byDate }, pdrOrder };
+      const pdrPlan = { ...p.pdrPlan };
+      if (pdrPlan[a.from]) pdrPlan[a.to] = [...(pdrPlan[a.to] ?? []), ...pdrPlan[a.from]];
+      delete pdrPlan[a.from];
+      return { ...p, schedule: { byDate }, pdrOrder, pdrPlan };
     }
     case 'clearSchedule':
       return { ...p, schedule: newSchedule() };
@@ -143,6 +150,14 @@ export function reducer(p: Project, a: Action): Project {
       if (a.ids) pdrOrder[a.date] = a.ids;
       else delete pdrOrder[a.date];
       return { ...p, pdrOrder };
+    }
+    case 'setPdrPlan': {
+      const pdrPlan = { ...p.pdrPlan };
+      const pdrOrder = { ...p.pdrOrder };
+      if (a.items) pdrPlan[a.date] = a.items;
+      else delete pdrPlan[a.date];
+      delete pdrOrder[a.date];
+      return { ...p, pdrPlan, pdrOrder };
     }
     case 'addTag': {
       const name = normalizeName(a.categoryId, a.name);
@@ -322,6 +337,13 @@ export function validateProject(data: unknown): Project | null {
             .map(([date, ids]) => [date, strList(ids)]),
         )
       : {},
+    pdrPlan: isObj(p.pdrPlan)
+      ? Object.fromEntries(
+          Object.entries(p.pdrPlan)
+            .filter(([date, items]) => /^\d{4}-\d{2}-\d{2}$/.test(date) && Array.isArray(items))
+            .map(([date, items]) => [date, (items as unknown[]).filter(isObj).map(validPlanItem).filter((x) => x !== null)]),
+        )
+      : {},
   };
 }
 
@@ -346,6 +368,20 @@ function validShot(s: Shot): Shot {
     setup: str(s.setup),
     gapMinutes: typeof s.gapMinutes === 'number' && s.gapMinutes >= 0 ? Math.round(s.gapMinutes) : null,
   };
+}
+
+const PLAN_KINDS: PlanItemKind[] = ['shot', 'reset', 'move', 'lunch', 'break'];
+const clockMinutes = (v: unknown) => (typeof v === 'number' && v >= 0 && v < 48 * 60 ? Math.round(v) : undefined);
+
+function validPlanItem(raw: Record<string, unknown>): PlanItem | null {
+  if (!str(raw.id) || !PLAN_KINDS.includes(raw.kind as PlanItemKind)) return null;
+  const item: PlanItem = { id: raw.id as string, kind: raw.kind as PlanItemKind };
+  const minutes = clockMinutes(raw.minutes);
+  const at = clockMinutes(raw.at);
+  if (minutes !== undefined) item.minutes = minutes;
+  if (at !== undefined) item.at = at;
+  if (str(raw.label)) item.label = raw.label as string;
+  return item;
 }
 
 function validPdr(raw: unknown): PdrSettings {

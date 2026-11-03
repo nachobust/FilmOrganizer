@@ -14,7 +14,7 @@
 // After lunch the same location needs no reset, but a new location still needs its move.
 // A day the user arranged by hand keeps their order (see sequenceManual).
 
-import { SHOT_TYPES, shootDayNumbers, type PdrSettings, type Project, type Shot } from './model';
+import { SHOT_TYPES, shootDayNumbers, uid, type PdrSettings, type PlanItem, type Project, type Shot } from './model';
 
 /** A shot ready for sequencing: scenes without a shot list stand in as one shot each. */
 export interface PdrShot extends Shot {
@@ -23,7 +23,7 @@ export interface PdrShot extends Shot {
   placeholder: boolean;
 }
 
-export type PdrRowKind = 'call' | 'prep' | 'shot' | 'reset' | 'move' | 'lunch' | 'wrap' | 'end' | 'daySep';
+export type PdrRowKind = 'call' | 'prep' | 'shot' | 'reset' | 'move' | 'lunch' | 'break' | 'wrap' | 'end' | 'daySep';
 
 export interface PdrRow {
   kind: PdrRowKind;
@@ -39,6 +39,12 @@ export interface PdrRow {
   /** Company move: from → to. */
   from?: string;
   to?: string;
+  /** In a plan laid out by the user: the plan row this comes from. */
+  planId?: string;
+  /** The user's own text for the row. */
+  label?: string;
+  /** The user fixed this row's start time. */
+  pinned?: boolean;
 }
 
 export const toMinutes = (hhmm: string) => {
@@ -254,17 +260,136 @@ function sequenceDay(shots: PdrShot[], cfg: PdrSettings, day: number, order?: st
  * Orders shots day by day (ascending), joined by a day separator. `orders` holds the days the
  * user arranged by hand (by shooting day number); the others are ordered automatically.
  */
-export function sequencePdr(shots: PdrShot[], cfg: PdrSettings, orders: Map<number, string[]> = new Map()): PdrRow[] {
-  const days = [...new Set(shots.map((s) => s.day))].sort((a, b) => a - b);
-  return days.flatMap((day, i) => [
-    ...(i ? [{ kind: 'daySep' as const, day }] : []),
-    ...sequenceDay(
-      shots.filter((s) => s.day === day),
-      cfg,
+export function sequencePdr(
+  shots: PdrShot[],
+  cfg: PdrSettings,
+  orders: Map<number, string[]> = new Map(),
+  plans: Map<number, PlanItem[]> = new Map(),
+): PdrRow[] {
+  const days = [...new Set([...shots.map((s) => s.day), ...plans.keys()])].sort((a, b) => a - b);
+  return days.flatMap((day, i) => {
+    const own = shots.filter((s) => s.day === day);
+    const plan = plans.get(day);
+    return [
+      ...(i ? [{ kind: 'daySep' as const, day }] : []),
+      ...(plan ? sequencePlan(own, plan, cfg, day) : sequenceDay(own, cfg, day, orders.get(day))),
+    ];
+  });
+}
+
+/** Default length of a row the user added, by kind. */
+export function defaultMinutes(kind: PlanItem['kind'], cfg: PdrSettings): number {
+  return { shot: cfg.shotMinutes, reset: cfg.resetMinutes, move: cfg.moveMinutes, lunch: cfg.lunchMinutes, break: 15 }[kind];
+}
+
+/**
+ * A day laid out by the user: every row runs in their order, each one starting when the row
+ * before ends unless they fixed its start. Nothing is added or reordered; problems (overlaps,
+ * a location change without a company move) are reported by planWarnings instead. Shots added
+ * to the day after the plan was made go at the end.
+ */
+function sequencePlan(shots: PdrShot[], plan: PlanItem[], cfg: PdrSettings, day: number): PdrRow[] {
+  const call = toMinutes(cfg.callTime);
+  const rows: PdrRow[] = [{ kind: 'call', day, start: call }];
+  let clock = call;
+  if (cfg.prepMinutes > 0) {
+    rows.push({ kind: 'prep', day, start: call, end: call + cfg.prepMinutes });
+    clock += cfg.prepMinutes;
+  }
+  const byId = new Map(shots.map((s) => [s.id, s]));
+  const placed = new Set<string>();
+  const items: PlanItem[] = [...plan, ...shots.filter((s) => !plan.some((p) => p.id === s.id)).map((s): PlanItem => ({ id: s.id, kind: 'shot' }))];
+  for (const item of items) {
+    const shot = item.kind === 'shot' ? byId.get(item.id) : undefined;
+    if (item.kind === 'shot' && (!shot || placed.has(item.id))) continue; // deleted since, or listed twice
+    if (shot) placed.add(shot.id);
+    const start = item.at ?? clock;
+    const minutes = shot
+      ? (shot.placeholder ? item.minutes : undefined) ?? shot.minutes ?? cfg.shotMinutes
+      : item.minutes ?? defaultMinutes(item.kind, cfg);
+    rows.push({
+      kind: item.kind,
       day,
-      orders.get(day),
-    ),
-  ]);
+      start,
+      end: start + minutes,
+      ...(shot ? { shot } : {}),
+      planId: item.id,
+      ...(item.label ? { label: item.label } : {}),
+      ...(item.at !== undefined ? { pinned: true } : {}),
+    });
+    clock = start + minutes;
+  }
+  // A company move goes from the last location before it to the next one after it.
+  rows.forEach((r, i) => {
+    if (r.kind !== 'move') return;
+    r.from = rows.slice(0, i).reverse().find((x) => x.shot)?.shot?.location;
+    r.to = rows.slice(i + 1).find((x) => x.shot)?.shot?.location;
+  });
+  rows.push({ kind: 'wrap', day, start: clock, end: clock + cfg.wrapMinutes });
+  rows.push({ kind: 'end', day, start: clock + cfg.wrapMinutes });
+  return rows;
+}
+
+/**
+ * Turns the rows of one day, as shown, into a plan the user can rearrange: same order and the same
+ * lengths, so nothing moves until they change something. A lunch that waited for the lunch time
+ * keeps its start time.
+ */
+/** Rows that are part of a plan the user can rearrange: shots and the rows between them (not call, prep, wrap). */
+export const isPlanRow = (r: PdrRow) =>
+  r.start !== undefined &&
+  r.end !== undefined &&
+  ((r.kind === 'shot' && !!r.shot) || r.kind === 'reset' || r.kind === 'move' || r.kind === 'lunch' || r.kind === 'break');
+
+export function planFromRows(rows: PdrRow[]): PlanItem[] {
+  const items: PlanItem[] = [];
+  rows.forEach((r, i) => {
+    if (r.start === undefined || r.end === undefined) return;
+    if (r.kind === 'shot' && r.shot) {
+      items.push({
+        id: r.shot.id,
+        kind: 'shot',
+        ...(r.shot.placeholder ? { minutes: r.end - r.start } : {}),
+        ...(r.pinned ? { at: r.start } : {}),
+      });
+      return;
+    }
+    if (r.kind !== 'reset' && r.kind !== 'move' && r.kind !== 'lunch' && r.kind !== 'break') return;
+    const prevEnd = rows[i - 1]?.end;
+    items.push({
+      id: r.planId ?? uid(),
+      kind: r.kind,
+      minutes: r.end - r.start,
+      ...(r.label ? { label: r.label } : {}),
+      ...(r.pinned || (r.kind === 'lunch' && prevEnd !== undefined && r.start > prevEnd) ? { at: r.start } : {}),
+    });
+  });
+  return items;
+}
+
+export interface PlanWarning {
+  /** Index in the rows. */
+  row: number;
+  text: string;
+}
+
+/** What may be wrong in a day the user laid out: overlapping times and location changes with no company move. */
+export function planWarnings(rows: PdrRow[]): PlanWarning[] {
+  const out: PlanWarning[] = [];
+  let lastShot: PdrShot | null = null;
+  let movedSince = false;
+  rows.forEach((r, i) => {
+    const prev = rows[i - 1];
+    if (r.pinned && prev?.end !== undefined && r.start !== undefined && r.start < prev.end)
+      out.push({ row: i, text: `Starts at ${fmtClock(r.start)}, before the row above ends (${fmtClock(prev.end)}).` });
+    if (r.kind === 'move') movedSince = true;
+    if (!r.shot) return;
+    if (lastShot && lastShot.location && r.shot.location && lastShot.location !== r.shot.location && !movedSince)
+      out.push({ row: i, text: `No company move between ${lastShot.location} and ${r.shot.location}.` });
+    lastShot = r.shot;
+    movedSince = false;
+  });
+  return out;
 }
 
 /**

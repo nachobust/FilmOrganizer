@@ -163,6 +163,26 @@ export interface Project {
    * (or "scene-<sheet id>" for a scene without a shot list). Days not listed use the automatic order.
    */
   pdrOrder: Record<string, string[]>;
+  /**
+   * A day's shooting plan as the user laid it out, per date: every row in order, shots and the
+   * resets, company moves, lunch and breaks between them. Takes over from `pdrOrder` and from the
+   * automatic order as soon as the user moves, adds, deletes or times a row by hand.
+   */
+  pdrPlan: Record<string, PlanItem[]>;
+}
+
+export type PlanItemKind = 'shot' | 'reset' | 'move' | 'lunch' | 'break';
+
+export interface PlanItem {
+  /** A shot's id (or "scene-<sheet id>"); for the other rows, an id of their own. */
+  id: string;
+  kind: PlanItemKind;
+  /** Length in minutes. For a shot it overrides the shot's own minutes only for a scene without a shot list. */
+  minutes?: number;
+  /** Fixed start ("starts at 14:00"), minutes since midnight; otherwise it starts when the row before ends. */
+  at?: number;
+  /** The row's own text, replacing "Reset: camera and lights", "LUNCH" and so on. */
+  label?: string;
 }
 
 export const GROUP_LABELS: Record<CategoryGroup, string> = {
@@ -239,6 +259,7 @@ export function newProject(title: string): Project {
     shots: [],
     pdr: { ...DEFAULT_PDR },
     pdrOrder: {},
+    pdrPlan: {},
   };
 }
 
