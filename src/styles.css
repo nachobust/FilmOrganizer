@@ -1342,12 +1342,36 @@ button.del:hover:not(:disabled) {
 input[type='time']::-webkit-calendar-picker-indicator {
   display: none;
 }
-.pdr-table .time-range input[type='time'] {
-  width: 56px;
+/* Times and row names read as plain text in the row's colour; the box shows only while editing. */
+.pdr-table td .time-range input[type='time'],
+.pdr-table td input.gap-label {
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  box-shadow: none;
+  cursor: text;
 }
-.pdr-table .time-range input.pinned {
+.pdr-table td .time-range input[type='time'] {
+  width: 56px;
+  padding: 1px 2px;
+  font-weight: 700;
+}
+.pdr-table td .time-range input[type='time']:hover,
+.pdr-table td input.gap-label:hover {
+  border-color: rgba(0, 0, 0, 0.15);
+}
+.pdr-table td .time-range input[type='time']:focus,
+.pdr-table td input.gap-label:focus {
+  outline: none;
   border-color: var(--accent);
-  background: var(--accent-soft);
+  background: var(--panel);
+  color: var(--text);
+}
+/* A fixed start time: same row colour, marked by its blue underline. */
+.pdr-table td .time-range input.pinned {
+  color: var(--accent);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
 }
 .row-tools {
   display: inline-flex;
@@ -1373,9 +1397,6 @@ input[type='time']::-webkit-calendar-picker-indicator {
   border: 1px solid transparent;
   border-radius: 4px;
   background: transparent;
-}
-.gap-label:hover {
-  border-color: rgba(0, 0, 0, 0.18);
 }
 .gap-label:focus {
   outline: none;
