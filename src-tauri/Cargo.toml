@@ -1,6 +1,6 @@
 [package]
 name = "filmorganizer"
-version = "0.2.3"
+version = "0.2.4"
 description = "Film breakdown and scheduling app"
 authors = ["nachobust"]
 license = "MIT"
