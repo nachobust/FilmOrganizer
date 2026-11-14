@@ -16,6 +16,11 @@ export interface BreakdownElement {
   name: string;
   /** Cast ID number shown on strips (cast category only). */
   castId?: number;
+  /** Cast only: who plays the character, and how to reach them (for the call sheet). */
+  actor?: string;
+  phone?: string;
+  /** Cast only: dates ("YYYY-MM-DD") the actor can't shoot. */
+  unavailable?: string[];
 }
 
 export type TagState = 'confirmed' | 'suggested';
@@ -169,7 +174,73 @@ export interface Project {
    * automatic order as soon as the user moves, adds, deletes or times a row by hand.
    */
   pdrPlan: Record<string, PlanItem[]>;
+  /** Dates whose shooting plan the user started although the day has no shot list. */
+  pdrStarted: string[];
+  /** Dates marked as days off (no shooting): shown in red, and warned about if scenes are on them. */
+  daysOff: string[];
+  /** Who's who and where, for the call sheets. */
+  production: Production;
+  /** What each day's call sheet adds to the shooting plan, per date. */
+  callSheets: Record<string, CallSheetDay>;
 }
+
+export interface CrewMember {
+  id: string;
+  department: string;
+  role: string;
+  name: string;
+  phone: string;
+  /** Call time when it differs from the general call ("HH:MM"); empty = general call. */
+  call: string;
+}
+
+/** Address and practical details for a set, keyed by the set's name. */
+export interface LocationInfo {
+  address: string;
+  parking: string;
+  hospital: string;
+  notes: string;
+}
+
+export interface Production {
+  company: string;
+  director: string;
+  producer: string;
+  productionManager: string;
+  /** Phone numbers shown at the top of every call sheet. */
+  contactPhone: string;
+  crew: CrewMember[];
+  /** Keyed by set name in capitals, as in the breakdown ("KITCHEN"). */
+  locations: Record<string, LocationInfo>;
+}
+
+export const newProduction = (): Production => ({
+  company: '',
+  director: '',
+  producer: '',
+  productionManager: '',
+  contactPhone: '',
+  crew: [],
+  locations: {},
+});
+
+/** One actor's times on one day. Empty fields fall back to the defaults shown on the call sheet. */
+export interface CastTimes {
+  pickup: string;
+  call: string;
+  makeup: string;
+  onSet: string;
+}
+
+export interface CallSheetDay {
+  weather: string;
+  sunrise: string;
+  sunset: string;
+  notes: string;
+  cast: Record<string, Partial<CastTimes>>;
+}
+
+export const newCallSheetDay = (): CallSheetDay => ({ weather: '', sunrise: '', sunset: '', notes: '', cast: {} });
 
 export type PlanItemKind = 'shot' | 'reset' | 'move' | 'lunch' | 'break';
 
@@ -260,6 +331,10 @@ export function newProject(title: string): Project {
     pdr: { ...DEFAULT_PDR },
     pdrOrder: {},
     pdrPlan: {},
+    pdrStarted: [],
+    daysOff: [],
+    production: newProduction(),
+    callSheets: {},
   };
 }
 

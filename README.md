@@ -35,6 +35,9 @@ This is needed only once.
 - **Schedule** — month calendar with month/year navigation; click any day to open that week's drag-and-drop stripboard with an Unscheduled pool and per-day page totals.
 - **Shot lists** — import a shot list (Excel, or a table in Word or plain text; English or Spanish column names) to start a project from it, or add one to any shooting day from its column on the stripboard. Shots are grouped into scenes and their talent becomes cast.
 - **Shooting plan** — each shooting day becomes a timed plan: call, prep, one location at a time, full-cast masters first then each character closing in, inserts before lunch, field and product shots after, with resets and company moves timed. Edit descriptions, notes and end times, drag rows into your own order or delete them, and the day re-times itself. Export it as Excel, or into your own template, with English or Spanish labels.
+- **Call sheets** — one per shooting day, built from the schedule and the shooting plan: key times, conditions, locations (address, parking, nearest hospital), scenes, cast call (pickup, call, make-up, on set) and crew call. Set up the actor for each character, the crew and the locations once under **Call sheet → Cast, crew & locations**. Export as PDF or Excel.
+- **Days off and availability** — mark days off on the stripboard (shown in muted red), and the dates each actor can't shoot. Scenes on a day off, or with an actor who isn't available, are marked on the stripboard and the call sheet.
+- **Undo and redo** — Ctrl+Z / Ctrl+Y (or the arrows next to the project name) for any change to the project.
 - **Export** — PDF with the breakdown, calendar and stripboard, each starting on its own page; an Excel workbook with the same three as separate tabs (plus an Elements tab); and a JSON project file.
 
 Projects are saved automatically (in the app, or in the browser for the web version); use **Export → Project file** to keep a copy.

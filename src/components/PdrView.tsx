@@ -26,6 +26,7 @@ import {
   type PdrShot,
 } from '../pdr';
 import { exportPdrIntoTemplate, exportPdrXLSX, pdrLabels, rowLabel, timeText } from '../pdr-export';
+import { planStarted } from '../callsheet';
 import { askConfirm } from '../platform';
 import { SHOT_LIST_ACCEPT } from '../shots';
 import type { Action } from '../store';
@@ -79,8 +80,10 @@ export default function PdrView(props: {
   const dayNumbers = useMemo(() => shootDayNumbers(project.schedule), [project.schedule]);
   const dates = [...dayNumbers.keys()];
   const day: PdrDay | null = props.day === 'all' || (props.day && dayNumbers.has(props.day)) ? props.day : (dates[0] ?? null);
-  const selected = day === 'all' ? dates : day ? [day] : [];
+  const started = (d: string) => planStarted(project, d);
+  const selected = (day === 'all' ? dates : day ? [day] : []).filter(started);
   const single = day !== null && day !== 'all' ? day : null;
+  const notStarted = !!single && !started(single);
   const dayNo = single ? dayNumbers.get(single)! : 0;
 
   const shots = useMemo(() => pdrShots(project, selected), [project, selected.join()]);
@@ -428,154 +431,172 @@ export default function PdrView(props: {
         />
       </div>
 
-      <div className="pdr-settings">
-        <label>
-          Call
-          <input type="time" value={project.pdr.callTime} onChange={(e) => e.target.value && set({ callTime: e.target.value })} />
-        </label>
-        <label>
-          Lunch at
-          <input type="time" value={project.pdr.lunchAt} onChange={(e) => e.target.value && set({ lunchAt: e.target.value })} />
-        </label>
-        {NUMBER_SETTINGS.map(([key, label]) => (
-          <label key={key}>
-            {label}
-            <span className="with-unit">
-              <input
-                type="number"
-                min={0}
-                step={5}
-                value={project.pdr[key] as number}
-                onChange={(e) => set({ [key]: Math.max(0, Number(e.target.value) || 0) })}
-              />
-              min
-            </span>
-          </label>
-        ))}
-        <label>
-          Sheet labels
-          <select
-            value={project.pdr.sheetLanguage}
-            onChange={(e) => set({ sheetLanguage: e.target.value as PdrSettings['sheetLanguage'] })}
-          >
-            <option value="en">English</option>
-            <option value="es">Español</option>
-          </select>
-        </label>
-      </div>
-
-      {withoutList.length > 0 && (
-        <p className="hint">
-          {withoutList.length === 1 ? 'Scene' : 'Scenes'} {withoutList.join(', ')} {withoutList.length === 1 ? 'has' : 'have'} no
-          shot list, so {withoutList.length === 1 ? 'it shows' : 'each shows'} as one row timed at about an hour per page.
-          {single && ' Upload a shot list for this day to break them into shots.'}
-        </p>
-      )}
-
-      {pickedRows.length > 0 && (
-        <div className="pick-bar" role="status">
-          {pickedRows.length} row{pickedRows.length === 1 ? '' : 's'} selected · drag any of them to move them together
-          <button className="danger" onClick={() => void remove(pickedRows)}>
-            Delete selected
-          </button>
-          <button className="ghost" onClick={() => setPicked(new Set())}>
-            Clear selection
-          </button>
+      {notStarted ? (
+        <div className="pdr-start">
+          <h3>No shooting plan for this day yet</h3>
+          <p>
+            Upload this day's shot list to build the plan from its shots, or start one from the scenes scheduled on this day
+            (about an hour per page) and fill it in yourself.
+          </p>
+          <div className="empty-actions">
+            <button className="primary" onClick={() => dispatch({ type: 'startPdr', date: single! })}>
+              Start the shooting plan
+            </button>
+            <button onClick={() => props.onUploadForDay(single!)}>Upload shot list for this day…</button>
+          </div>
         </div>
-      )}
+      ) : (
+        <>
+        <div className="pdr-settings">
+          <label>
+            Call
+            <input type="time" value={project.pdr.callTime} onChange={(e) => e.target.value && set({ callTime: e.target.value })} />
+          </label>
+          <label>
+            Lunch at
+            <input type="time" value={project.pdr.lunchAt} onChange={(e) => e.target.value && set({ lunchAt: e.target.value })} />
+          </label>
+          {NUMBER_SETTINGS.map(([key, label]) => (
+            <label key={key}>
+              {label}
+              <span className="with-unit">
+                <input
+                  type="number"
+                  min={0}
+                  step={5}
+                  value={project.pdr[key] as number}
+                  onChange={(e) => set({ [key]: Math.max(0, Number(e.target.value) || 0) })}
+                />
+                min
+              </span>
+            </label>
+          ))}
+          <label>
+            Sheet labels
+            <select
+              value={project.pdr.sheetLanguage}
+              onChange={(e) => set({ sheetLanguage: e.target.value as PdrSettings['sheetLanguage'] })}
+            >
+              <option value="en">English</option>
+              <option value="es">Español</option>
+            </select>
+          </label>
+        </div>
 
-      <table className="pdr-table">
-        <thead>
-          <tr>
-            <th className="c-drag" aria-label="Select and move" />
-            <th className="c-time">Time</th>
-            <th className="c-scene">Shot</th>
-            <th className="c-desc">Description</th>
-            {showTalent && <th className="c-talent">Talent</th>}
-            <th className="c-type">Size</th>
-            <th className="c-cat">Category</th>
-            <th className="c-notes">Production notes</th>
-            <th className="c-del" aria-label="Delete" />
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => {
-            const rowWarnings = warningsAt(i);
-            if (!isPlanRow(r))
-              return (
-                <tr key={`${r.kind}-${i}`} className={`pdr-${r.kind}`}>
-                  <td className="c-drag" />
-                  <td className="c-time">{r.kind === 'end' || r.kind === 'daySep' ? '' : timeText(r)}</td>
-                  <td colSpan={columns - 2}>{rowLabel(r, labels)}</td>
-                </tr>
+        {withoutList.length > 0 && (
+          <p className="hint">
+            {withoutList.length === 1 ? 'Scene' : 'Scenes'} {withoutList.join(', ')} {withoutList.length === 1 ? 'has' : 'have'} no
+            shot list, so {withoutList.length === 1 ? 'it shows' : 'each shows'} as one row timed at about an hour per page.
+            {single && ' Upload a shot list for this day to break them into shots.'}
+          </p>
+        )}
+
+        {pickedRows.length > 0 && (
+          <div className="pick-bar" role="status">
+            {pickedRows.length} row{pickedRows.length === 1 ? '' : 's'} selected · drag any of them to move them together
+            <button className="danger" onClick={() => void remove(pickedRows)}>
+              Delete selected
+            </button>
+            <button className="ghost" onClick={() => setPicked(new Set())}>
+              Clear selection
+            </button>
+          </div>
+        )}
+
+        <table className="pdr-table">
+          <thead>
+            <tr>
+              <th className="c-drag" aria-label="Select and move" />
+              <th className="c-time">Time</th>
+              <th className="c-scene">Shot</th>
+              <th className="c-desc">Description</th>
+              {showTalent && <th className="c-talent">Talent</th>}
+              <th className="c-type">Size</th>
+              <th className="c-cat">Category</th>
+              <th className="c-notes">Production notes</th>
+              <th className="c-del" aria-label="Delete" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => {
+              const rowWarnings = warningsAt(i);
+              if (!isPlanRow(r))
+                return (
+                  <tr key={`${r.kind}-${i}`} className={`pdr-${r.kind}`}>
+                    <td className="c-drag" />
+                    <td className="c-time">{r.kind === 'end' || r.kind === 'daySep' ? '' : timeText(r)}</td>
+                    <td colSpan={columns - 2}>{rowLabel(r, labels)}</td>
+                  </tr>
+                );
+              const dnd = rowDnD(i);
+              const del = (
+                <td className="c-del">
+                  {single && (
+                    <button
+                      className="ghost del"
+                      onClick={() => void remove([i])}
+                      title={r.shot?.placeholder ? 'Take this scene off the day' : 'Delete this row'}
+                      aria-label="Delete row"
+                    >
+                      ×
+                    </button>
+                  )}
+                </td>
               );
-            const dnd = rowDnD(i);
-            const del = (
-              <td className="c-del">
-                {single && (
-                  <button
-                    className="ghost del"
-                    onClick={() => void remove([i])}
-                    title={r.shot?.placeholder ? 'Take this scene off the day' : 'Delete this row'}
-                    aria-label="Delete row"
-                  >
-                    ×
-                  </button>
-                )}
-              </td>
-            );
-            if (!r.shot)
+              if (!r.shot)
+                return (
+                  <tr key={keyOf(i)} className={`pdr-${r.kind} pdr-gap ${dnd.className}`} onDragOver={dnd.onDragOver} onDrop={dnd.onDrop}>
+                    <td className="c-drag">{dnd.handle}</td>
+                    {timeCell(i)}
+                    <td colSpan={columns - 3}>
+                      {single ? (
+                        <input
+                          className="gap-label"
+                          value={rowLabel(r, labels)}
+                          onChange={(e) => setLabel(i, e.target.value)}
+                          aria-label="Row name"
+                        />
+                      ) : (
+                        rowLabel(r, labels)
+                      )}
+                      {rowWarnings.map((w) => (
+                        <div key={w} className="row-warning">
+                          ⚠ {w}
+                        </div>
+                      ))}
+                    </td>
+                    {del}
+                  </tr>
+                );
+              const s = r.shot;
               return (
-                <tr key={keyOf(i)} className={`pdr-${r.kind} pdr-gap ${dnd.className}`} onDragOver={dnd.onDragOver} onDrop={dnd.onDrop}>
+                <tr
+                  key={keyOf(i)}
+                  className={`pdr-shot ${s.keyShot ? 'key' : ''} ${s.placeholder ? 'placeholder' : ''} ${dnd.className}`}
+                  onDragOver={dnd.onDragOver}
+                  onDrop={dnd.onDrop}
+                >
                   <td className="c-drag">{dnd.handle}</td>
                   {timeCell(i)}
-                  <td colSpan={columns - 3}>
-                    {single ? (
-                      <input
-                        className="gap-label"
-                        value={rowLabel(r, labels)}
-                        onChange={(e) => setLabel(i, e.target.value)}
-                        aria-label="Row name"
-                      />
-                    ) : (
-                      rowLabel(r, labels)
-                    )}
-                    {rowWarnings.map((w) => (
-                      <div key={w} className="row-warning">
-                        ⚠ {w}
-                      </div>
-                    ))}
-                  </td>
+                  <ShotCells shot={s} showTalent={showTalent} dispatch={dispatch} warnings={rowWarnings} />
                   {del}
                 </tr>
               );
-            const s = r.shot;
-            return (
-              <tr
-                key={keyOf(i)}
-                className={`pdr-shot ${s.keyShot ? 'key' : ''} ${s.placeholder ? 'placeholder' : ''} ${dnd.className}`}
-                onDragOver={dnd.onDragOver}
-                onDrop={dnd.onDrop}
-              >
-                <td className="c-drag">{dnd.handle}</td>
-                {timeCell(i)}
-                <ShotCells shot={s} showTalent={showTalent} dispatch={dispatch} warnings={rowWarnings} />
-                {del}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      <p className="hint">
-        {single
-          ? isPlan
-            ? 'This day follows your own layout: rows run in the order you set, and nothing is added for you. ⚠ marks a possible problem. '
-            : 'Shots are ordered by production logic: one location at a time, full-cast masters first, then each character closing in, inserts before leaving the location and field / product shots after lunch. '
-          : 'Pick a single day to move, add or retime rows. '}
-        {single &&
-          'Drag rows by ⋮⋮, or tick several and drag one of them to move them together. Change a start time to fix it, or an end time to change how long a row takes. '}
-        ⭐ marks a key shot.
-      </p>
+            })}
+          </tbody>
+        </table>
+        <p className="hint">
+          {single
+            ? isPlan
+              ? 'This day follows your own layout: rows run in the order you set, and nothing is added for you. ⚠ marks a possible problem. '
+              : 'Shots are ordered by production logic: one location at a time, full-cast masters first, then each character closing in, inserts before leaving the location and field / product shots after lunch. '
+            : 'Pick a single day to move, add or retime rows. '}
+          {single &&
+            'Drag rows by ⋮⋮, or tick several and drag one of them to move them together. Change a start time to fix it, or an end time to change how long a row takes. '}
+          ⭐ marks a key shot.
+        </p>
+        </>
+      )}
 
       {pending && (
         <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && setPending(null)}>

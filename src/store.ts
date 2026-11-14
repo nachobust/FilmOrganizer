@@ -1,10 +1,17 @@
 import {
   DEFAULT_PDR,
+  newCallSheetDay,
+  newProduction,
   newSchedule,
   newSheet,
   uid,
   type BreakdownElement,
+  type CallSheetDay,
+  type CastTimes,
+  type CrewMember,
+  type LocationInfo,
   type PdrSettings,
+  type Production,
   type PlanItem,
   type PlanItemKind,
   type Project,
@@ -56,7 +63,17 @@ export type Action =
   /** ids null = back to the automatic order for that date. */
   | { type: 'setPdrOrder'; date: string; ids: string[] | null }
   /** items null = back to the automatic order for that date (also forgets a dragged order). */
-  | { type: 'setPdrPlan'; date: string; items: PlanItem[] | null };
+  | { type: 'setPdrPlan'; date: string; items: PlanItem[] | null }
+  /** A day without a shot list gets a shooting plan only once the user starts it. */
+  | { type: 'startPdr'; date: string }
+  | { type: 'toggleDayOff'; date: string }
+  /** Cast details: actor, phone, dates they can't shoot. */
+  | { type: 'updateElement'; elementId: string; patch: Pick<BreakdownElement, 'actor' | 'phone' | 'unavailable'> }
+  | { type: 'setProduction'; patch: Partial<Omit<Production, 'crew' | 'locations'>> }
+  | { type: 'setCrew'; crew: CrewMember[] }
+  | { type: 'setLocation'; set: string; patch: Partial<LocationInfo> }
+  | { type: 'setCallSheet'; date: string; patch: Partial<Omit<CallSheetDay, 'cast'>> }
+  | { type: 'setCastTimes'; date: string; elementId: string; patch: Partial<CastTimes> };
 
 const normalizeName = (categoryId: string, name: string) => {
   const n = name.trim().replace(/\s+/g, ' ');
@@ -91,6 +108,69 @@ const mapSheet = (p: Project, id: string | undefined, fn: (s: Sheet) => Sheet): 
   ...p,
   sheets: p.sheets.map((s) => (id === undefined || s.id === id ? fn(s) : s)),
 });
+
+// ---------------------------------------------------------------- Undo / redo
+
+export interface History {
+  past: Project[];
+  present: Project;
+  future: Project[];
+  /** The last change, so quick edits to the same field count as one step. */
+  lastKey?: string;
+  lastAt?: number;
+}
+
+export type HistoryAction = Action | { type: 'undo' } | { type: 'redo' };
+
+const UNDO_LIMIT = 100;
+/** Edits to the same field closer together than this are one undo step (typing a word, not each letter). */
+const GROUP_MS = 1000;
+
+/** Which edits merge into one step: the same kind of change to the same thing and the same fields. */
+function groupKey(a: Action): string | undefined {
+  const fields = (patch: object) => Object.keys(patch).sort().join(',');
+  switch (a.type) {
+    case 'setTitle':
+      return 'title';
+    case 'updateSheet':
+    case 'updateShot':
+      return `${a.type}:${a.id}:${fields(a.patch)}`;
+    case 'setPdr':
+    case 'setProduction':
+      return `${a.type}:${fields(a.patch)}`;
+    case 'updateElement':
+      return `${a.type}:${a.elementId}:${fields(a.patch)}`;
+    case 'setLocation':
+      return `${a.type}:${a.set}:${fields(a.patch)}`;
+    case 'setCallSheet':
+      return `${a.type}:${a.date}:${fields(a.patch)}`;
+    case 'setCastTimes':
+      return `${a.type}:${a.date}:${a.elementId}:${fields(a.patch)}`;
+    case 'renameElement':
+      return `${a.type}:${a.elementId}`;
+    default:
+      return undefined;
+  }
+}
+
+export const initHistory = (present: Project): History => ({ past: [], present, future: [] });
+
+export function historyReducer(h: History, a: HistoryAction, now = Date.now()): History {
+  if (a.type === 'undo') {
+    if (!h.past.length) return h;
+    return { past: h.past.slice(0, -1), present: h.past[h.past.length - 1], future: [h.present, ...h.future] };
+  }
+  if (a.type === 'redo') {
+    if (!h.future.length) return h;
+    return { past: [...h.past, h.present], present: h.future[0], future: h.future.slice(1) };
+  }
+  const next = reducer(h.present, a);
+  if (next === h.present) return h;
+  const key = groupKey(a);
+  if (key && key === h.lastKey && h.lastAt !== undefined && now - h.lastAt < GROUP_MS)
+    return { ...h, present: next, future: [], lastAt: now };
+  return { past: [...h.past, h.present].slice(-UNDO_LIMIT), present: next, future: [], lastKey: key, lastAt: now };
+}
 
 export function reducer(p: Project, a: Action): Project {
   switch (a.type) {
@@ -135,7 +215,11 @@ export function reducer(p: Project, a: Action): Project {
       const pdrPlan = { ...p.pdrPlan };
       if (pdrPlan[a.from]) pdrPlan[a.to] = [...(pdrPlan[a.to] ?? []), ...pdrPlan[a.from]];
       delete pdrPlan[a.from];
-      return { ...p, schedule: { byDate }, pdrOrder, pdrPlan };
+      const callSheets = { ...p.callSheets };
+      if (callSheets[a.from] && !callSheets[a.to]) callSheets[a.to] = callSheets[a.from];
+      delete callSheets[a.from];
+      const started = p.pdrStarted.includes(a.from) ? [...p.pdrStarted.filter((d) => d !== a.from), a.to] : p.pdrStarted;
+      return { ...p, schedule: { byDate }, pdrOrder, pdrPlan, callSheets, pdrStarted: started };
     }
     case 'clearSchedule':
       return { ...p, schedule: newSchedule() };
@@ -158,6 +242,33 @@ export function reducer(p: Project, a: Action): Project {
       else delete pdrPlan[a.date];
       delete pdrOrder[a.date];
       return { ...p, pdrPlan, pdrOrder };
+    }
+    case 'startPdr':
+      return p.pdrStarted.includes(a.date) ? p : { ...p, pdrStarted: [...p.pdrStarted, a.date] };
+    case 'toggleDayOff':
+      return {
+        ...p,
+        daysOff: p.daysOff.includes(a.date) ? p.daysOff.filter((d) => d !== a.date) : [...p.daysOff, a.date].sort(),
+      };
+    case 'updateElement':
+      return { ...p, elements: p.elements.map((e) => (e.id === a.elementId ? { ...e, ...a.patch } : e)) };
+    case 'setProduction':
+      return { ...p, production: { ...p.production, ...a.patch } };
+    case 'setCrew':
+      return { ...p, production: { ...p.production, crew: a.crew } };
+    case 'setLocation': {
+      const key = a.set.trim().toUpperCase();
+      const current = p.production.locations[key] ?? { address: '', parking: '', hospital: '', notes: '' };
+      return { ...p, production: { ...p.production, locations: { ...p.production.locations, [key]: { ...current, ...a.patch } } } };
+    }
+    case 'setCallSheet': {
+      const day = p.callSheets[a.date] ?? newCallSheetDay();
+      return { ...p, callSheets: { ...p.callSheets, [a.date]: { ...day, ...a.patch } } };
+    }
+    case 'setCastTimes': {
+      const day = p.callSheets[a.date] ?? newCallSheetDay();
+      const cast = { ...day.cast, [a.elementId]: { ...day.cast[a.elementId], ...a.patch } };
+      return { ...p, callSheets: { ...p.callSheets, [a.date]: { ...day, cast } } };
     }
     case 'addTag': {
       const name = normalizeName(a.categoryId, a.name);
@@ -258,9 +369,22 @@ export function loadSaved(): Project | null {
 export function saveProject(p: Project): boolean {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
+    localStorage.setItem(SAVED_AT_KEY, String(Date.now()));
     return true;
   } catch {
     return false;
+  }
+}
+
+const SAVED_AT_KEY = 'filmorganizer.savedAt';
+
+/** When the project was last saved on this computer (ms since epoch), if known. */
+export function savedAt(): number | null {
+  try {
+    const v = Number(localStorage.getItem(SAVED_AT_KEY));
+    return v > 0 ? v : null;
+  } catch {
+    return null;
   }
 }
 
@@ -282,7 +406,13 @@ export function validateProject(data: unknown): Project | null {
   const catIds = new Set(categories.map((c) => c.id));
   const elements = p.elements
     .filter((e) => isObj(e) && str(e.id) && str(e.name) && catIds.has(e.categoryId))
-    .map((e) => ({ ...e, castId: typeof e.castId === 'number' ? e.castId : undefined }));
+    .map((e) => ({
+      ...e,
+      castId: typeof e.castId === 'number' ? e.castId : undefined,
+      actor: typeof e.actor === 'string' ? e.actor : undefined,
+      phone: typeof e.phone === 'string' ? e.phone : undefined,
+      unavailable: Array.isArray(e.unavailable) ? strList(e.unavailable).filter(isDate) : undefined,
+    }));
   const elIds = new Set(elements.map((e) => e.id));
   const sheets = p.sheets.filter(isObj).map((raw) => {
     const s = raw as unknown as Partial<Sheet>;
@@ -344,7 +474,46 @@ export function validateProject(data: unknown): Project | null {
             .map(([date, items]) => [date, (items as unknown[]).filter(isObj).map(validPlanItem).filter((x) => x !== null)]),
         )
       : {},
+    pdrStarted: strList(p.pdrStarted).filter(isDate),
+    daysOff: strList(p.daysOff).filter(isDate),
+    production: validProduction(p.production),
+    callSheets: isObj(p.callSheets)
+      ? Object.fromEntries(
+          Object.entries(p.callSheets)
+            .filter(([date, d]) => isDate(date) && isObj(d))
+            .map(([date, d]) => [date, validCallSheet(d as unknown as Record<string, unknown>)]),
+        )
+      : {},
   };
+}
+
+const isDate = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d);
+
+function validProduction(raw: unknown): Production {
+  const pr = newProduction();
+  if (!isObj(raw)) return pr;
+  for (const k of ['company', 'director', 'producer', 'productionManager', 'contactPhone'] as const) pr[k] = str(raw[k]);
+  pr.crew = (Array.isArray(raw.crew) ? raw.crew : []).filter(isObj).map((c) => ({
+    id: str(c.id) || uid(),
+    department: str(c.department),
+    role: str(c.role),
+    name: str(c.name),
+    phone: str(c.phone),
+    call: str(c.call),
+  }));
+  if (isObj(raw.locations))
+    for (const [set, l] of Object.entries(raw.locations))
+      if (isObj(l)) pr.locations[set] = { address: str(l.address), parking: str(l.parking), hospital: str(l.hospital), notes: str(l.notes) };
+  return pr;
+}
+
+function validCallSheet(raw: Record<string, unknown>): CallSheetDay {
+  const day = newCallSheetDay();
+  for (const k of ['weather', 'sunrise', 'sunset', 'notes'] as const) day[k] = str(raw[k]);
+  if (isObj(raw.cast))
+    for (const [id, t] of Object.entries(raw.cast))
+      if (isObj(t)) day.cast[id] = Object.fromEntries((['pickup', 'call', 'makeup', 'onSet'] as const).filter((k) => str(t[k])).map((k) => [k, str(t[k])]));
+  return day;
 }
 
 const SHOT_TYPE_KEYS: ShotType[] = ['oner', 'ws', 'mws', 'fs', 'group', 'ms', 'mcu', 'cu', 'ecu', 'insert'];
