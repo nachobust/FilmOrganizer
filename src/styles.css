@@ -10,8 +10,15 @@
   --danger: #dc2626;
   --warn: #b45309;
   --row-h: 34px;
-  font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  font-size: 13px;
+  /* Type: Barlow for reading, Barlow Semi Condensed for column labels, Big Shoulders for
+     headings and strips, its Stencil cut only for the FilmOrganizer title, Courier Prime for script. */
+  --font-text: 'Barlow', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-label: 'Barlow Semi Condensed', 'Barlow', 'Arial Narrow', sans-serif;
+  --font-display: 'Big Shoulders Display Variable', 'Barlow Semi Condensed', 'Arial Narrow', sans-serif;
+  --font-logo: 'Big Shoulders Stencil Display', 'Big Shoulders Display Variable', 'Arial Narrow', sans-serif;
+  --font-script: 'Courier Prime', 'Courier New', Courier, monospace;
+  font-family: var(--font-text);
+  font-size: 13.5px;
   color: var(--text);
   background: var(--bg);
 }
@@ -106,8 +113,11 @@ select {
   border-bottom: 1px solid var(--border);
 }
 .brand {
-  font-weight: 700;
-  font-size: 15px;
+  font-family: var(--font-logo);
+  font-weight: 800;
+  font-size: 23px;
+  line-height: 1;
+  letter-spacing: 0.01em;
   margin-right: 6px;
 }
 .brand .muted {
@@ -193,6 +203,10 @@ select {
 }
 .empty h2 {
   margin: 0 0 6px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 30px;
+  line-height: 1.05;
 }
 .empty p {
   color: var(--muted);
@@ -230,8 +244,9 @@ select {
   top: 0;
   z-index: 2;
   background: #fafafa;
+  font-family: var(--font-label);
   font-weight: 600;
-  font-size: 11.5px;
+  font-size: 12.5px;
   color: #3f3f46;
   text-align: left;
   padding: 8px 8px;
@@ -389,6 +404,12 @@ select {
   border-bottom-color: var(--accent);
   font-weight: 600;
 }
+.tabs button {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: 0.02em;
+}
 .scene-actions {
   display: flex;
   gap: 6px;
@@ -425,7 +446,7 @@ select {
   flex: 1;
   overflow: auto;
   padding: 16px 20px;
-  font-family: 'Courier Prime', 'Courier New', Courier, monospace;
+  font-family: var(--font-script);
   font-size: 12.5px;
   line-height: 1.45;
 }
@@ -600,7 +621,9 @@ select {
 }
 .week-title {
   margin: 0 4px;
-  font-size: 15px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 20px;
   min-width: 190px;
   text-align: center;
 }
@@ -633,7 +656,8 @@ select {
 }
 .month-dow {
   padding: 6px 8px;
-  font-size: 11px;
+  font-family: var(--font-label);
+  font-size: 11.5px;
   font-weight: 600;
   letter-spacing: 1px;
   color: var(--muted);
@@ -680,7 +704,8 @@ select {
   border-radius: 11px;
 }
 .mc-day {
-  font-size: 10.5px;
+  font-family: var(--font-display);
+  font-size: 13px;
   font-weight: 700;
   color: var(--accent);
 }
@@ -706,8 +731,10 @@ select {
 /* Stripboard week */
 .section-title {
   margin: 4px 0 8px;
-  font-size: 11.5px;
-  letter-spacing: 1.5px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 1px;
   text-transform: uppercase;
   color: var(--muted);
 }
@@ -763,8 +790,10 @@ select {
   border-bottom: 1px solid var(--border);
 }
 .dname {
+  font-family: var(--font-display);
   font-weight: 700;
-  letter-spacing: 1.5px;
+  font-size: 17px;
+  letter-spacing: 1px;
 }
 .ddate {
   color: var(--muted);
@@ -772,7 +801,8 @@ select {
 }
 .dno {
   margin-left: auto;
-  font-size: 11px;
+  font-family: var(--font-display);
+  font-size: 14px;
   font-weight: 700;
   color: var(--accent);
 }
@@ -804,7 +834,7 @@ select {
   border-radius: 5px;
   border-left: 5px dashed rgba(0, 0, 0, 0.28);
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.18), 0 3px 6px rgba(0, 0, 0, 0.1);
-  font-family: 'Courier Prime', 'Courier New', Courier, monospace;
+  font-family: var(--font-script);
   cursor: grab;
   user-select: none;
 }
@@ -851,9 +881,12 @@ select {
   opacity: 0.85;
 }
 .card-set {
-  font-size: 12px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 14.5px;
+  letter-spacing: 0.01em;
   margin: 2px 0 4px;
-  line-height: 1.25;
+  line-height: 1.15;
 }
 .card-tag,
 .card-cast {
@@ -889,6 +922,10 @@ select {
 }
 .modal h3 {
   margin: 0 0 4px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 22px;
+  line-height: 1.1;
 }
 .modal label {
   display: flex;
@@ -1105,7 +1142,8 @@ p.form-error {
   background: #434343;
   color: #fff;
   text-align: left;
-  font-size: 11.5px;
+  font-family: var(--font-label);
+  font-size: 12.5px;
   padding: 6px 6px;
   position: sticky;
   top: 0;
