@@ -5,10 +5,13 @@ import { UPDATE_CHECK_NOTE } from './Updates';
 
 /** Change `id` (and the notes) with each release that has news; the popup then shows once more. */
 export const WHATS_NEW = {
-  id: '0.2.4',
-  title: 'New in 0.2.4: a tidier shooting plan',
+  id: '0.2.5',
+  title: 'New in 0.2.5: call sheets',
   items: [
-    ['Cleaner rows', 'Times and the names of resets, company moves and lunch now read as plain text in the row’s colour. Click one to edit it; fixed start times show in blue.'],
+    ['Call sheets', 'The new Call sheet tab makes one per shooting day from your schedule and shooting plan, ready to export as PDF or Excel. Add actors, crew and locations once under “Cast, crew & locations”.'],
+    ['Days off and availability', 'Mark days off on the stripboard, and the dates each actor can’t shoot. Anything scheduled against them is flagged.'],
+    ['Undo and redo', 'Ctrl+Z and Ctrl+Y, or the arrows next to the project name.'],
+    ['Cleaner rows', 'Times and the names of resets, company moves and lunch read as plain text in the row’s colour. Click one to edit it.'],
     ['Update now', 'From now on, when a new version is out the update bar has an “Update now” button: it downloads, installs and restarts the app for you. Turn it on under “Updates” in the bottom bar.'],
     ['Drag works again', 'In the desktop app you can drag strips on the stripboard and rows in the shooting plan.'],
     ['Every row is editable', 'Move, delete, rename and time resets, company moves and lunch like any shot, or add your own with “+ Add row”. Set a start or an end time on any row.'],
