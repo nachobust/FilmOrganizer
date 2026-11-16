@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { newProject, newSheet, type Project } from './model';
-import { loadSaved, reducer, saveProject, validateProject } from './store';
+import { historyReducer, initHistory, loadSaved, reducer, saveProject, validateProject } from './store';
 
 function projectWithSheet(): { p: Project; sheetId: string } {
   const sheet = newSheet({ sheetNumber: '1' });
@@ -149,5 +149,32 @@ describe('validateProject', () => {
       date: '2026-11-23',
     });
     expect(validateProject(JSON.parse(JSON.stringify(q)))).toEqual(q);
+  });
+});
+
+describe('undo and redo', () => {
+  it('undoes and redoes changes, and a new change clears what could be redone', () => {
+    let h = initHistory(newProject('A'));
+    h = historyReducer(h, { type: 'toggleDayOff', date: '2026-11-20' }, 1000);
+    h = historyReducer(h, { type: 'addSheet' }, 5000);
+    expect(h.present.sheets).toHaveLength(1);
+    h = historyReducer(h, { type: 'undo' });
+    expect(h.present.sheets).toHaveLength(0);
+    expect(h.present.daysOff).toEqual(['2026-11-20']);
+    h = historyReducer(h, { type: 'redo' });
+    expect(h.present.sheets).toHaveLength(1);
+    h = historyReducer(h, { type: 'undo' });
+    h = historyReducer(h, { type: 'setTitle', title: 'B' }, 9000);
+    expect(h.future).toHaveLength(0);
+  });
+
+  it('counts quick typing in one field as one step', () => {
+    let h = initHistory(newProject('A'));
+    h = historyReducer(h, { type: 'setTitle', title: 'Ne' }, 1000);
+    h = historyReducer(h, { type: 'setTitle', title: 'New' }, 1300);
+    h = historyReducer(h, { type: 'setTitle', title: 'New film' }, 1600);
+    expect(h.past).toHaveLength(1);
+    h = historyReducer(h, { type: 'undo' });
+    expect(h.present.title).toBe('A');
   });
 });

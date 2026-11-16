@@ -13,6 +13,7 @@ import {
   type Project,
   type Sheet,
 } from '../model';
+import { scheduleConflicts, type Conflict } from '../callsheet';
 import type { Action } from '../store';
 import { askConfirm } from '../platform';
 
@@ -219,16 +220,17 @@ function MonthView(props: {
           const strips = (project.schedule.byDate[iso] ?? []).map((id) => sheets.get(id)).filter((s): s is Sheet => !!s);
           const eighths = strips.reduce((n, s) => n + s.pages, 0);
           const dayNo = dayNumbers.get(iso);
+          const off = project.daysOff.includes(iso);
           return (
             <button
               key={iso}
-              className={`month-cell ${date.getMonth() !== month ? 'outside' : ''} ${iso === todayISO ? 'today' : ''} ${dayNo ? 'shoot' : ''}`}
+              className={`month-cell ${date.getMonth() !== month ? 'outside' : ''} ${iso === todayISO ? 'today' : ''} ${dayNo ? 'shoot' : ''} ${off ? 'day-off' : ''}`}
               onClick={() => setNav({ mode: 'week', date: iso })}
               title="Open this week's stripboard"
             >
               <span className="mc-top">
                 <span className="mc-date">{date.getDate()}</span>
-                {dayNo && <span className="mc-day">Day {dayNo}</span>}
+                {off ? <span className="mc-off">Day off</span> : dayNo && <span className="mc-day">Day {dayNo}</span>}
               </span>
               {strips.slice(0, 4).map((s) => {
                 const k = stripKind(s);
@@ -267,6 +269,12 @@ function WeekBoard(props: {
   onOpenPdr: (date: string) => void;
 }) {
   const { project, nav, setNav, dispatch, elMap, selectedId, onSelect, onEdit, onOpenPdr } = props;
+  /** Problems per scene and date: an actor who can't shoot that day, or a day off. */
+  const conflicts = useMemo(() => {
+    const m = new Map<string, Conflict[]>();
+    for (const c of scheduleConflicts(project)) m.set(`${c.date}|${c.sheetId}`, [...(m.get(`${c.date}|${c.sheetId}`) ?? []), c]);
+    return m;
+  }, [project]);
   const shotsPerSheet = useMemo(() => {
     const n = new Map<string, number>();
     for (const s of project.shots) n.set(s.sheetId, (n.get(s.sheetId) ?? 0) + 1);
@@ -325,10 +333,11 @@ function WeekBoard(props: {
     const k = stripKind(s);
     const cast = castIds(s, elMap);
     const ind = indicator?.id === s.id ? (indicator.before ? 'insert-before' : 'insert-after') : '';
+    const problems = date ? (conflicts.get(`${date}|${s.id}`) ?? []) : [];
     return (
       <div
         key={s.id}
-        className={`card ${ind} ${dragId === s.id ? 'dragging' : ''} ${selectedId === s.id ? 'selected' : ''}`}
+        className={`card ${ind} ${dragId === s.id ? 'dragging' : ''} ${selectedId === s.id ? 'selected' : ''} ${problems.length ? 'conflict' : ''}`}
         style={{ background: k.bg, color: k.ink } as CSSProperties}
         draggable
         onDragStart={(e) => {
@@ -354,7 +363,7 @@ function WeekBoard(props: {
             pages: formatEighths(s.pages),
           })
         }
-        title="Drag to schedule · double-click to edit"
+        title={[...problems.map((c) => `⚠ ${c.text}`), 'Drag to schedule · double-click to edit'].join('\n')}
       >
         <div className="card-row">
           <span className="card-scn">#{s.scenes || '—'}</span>
@@ -365,6 +374,13 @@ function WeekBoard(props: {
           <span className="card-tag">{k.label}</span>
           {cast.length > 0 && <span className="card-cast">Cast {cast.join(', ')}</span>}
         </div>
+        {problems.length > 0 && (
+          <div className="card-warning" title={problems.map((c) => c.text).join('\n')}>
+            {[...new Set(problems.map((c) => c.short))].map((s) => (
+              <div key={s}>⚠ {s}</div>
+            ))}
+          </div>
+        )}
       </div>
     );
   };
@@ -424,12 +440,20 @@ function WeekBoard(props: {
             const eighths = strips.reduce((n, s) => n + s.pages, 0);
             const dayNo = dayNumbers.get(iso);
             const shots = strips.reduce((n, s) => n + (shotsPerSheet.get(s.id) ?? 0), 0);
+            const off = project.daysOff.includes(iso);
             return (
-              <div key={iso} className={`day-col ${iso === toISO(new Date()) ? 'today' : ''}`}>
+              <div key={iso} className={`day-col ${iso === toISO(new Date()) ? 'today' : ''} ${off ? 'day-off' : ''}`}>
                 <div className="day-head">
                   <span className="dname">{WEEKDAYS[i]}</span>
                   <span className="ddate">{fmtShort(date)}</span>
-                  {dayNo && <span className="dno">Day {dayNo}</span>}
+                  {off ? <span className="doff">Day off</span> : dayNo && <span className="dno">Day {dayNo}</span>}
+                  <button
+                    className={`off-btn ${off ? 'on' : ''}`}
+                    onClick={() => dispatch({ type: 'toggleDayOff', date: iso })}
+                    title={off ? 'Make this a shooting day again' : 'Mark as a day off (no shooting)'}
+                  >
+                    {off ? 'Undo day off' : 'Day off'}
+                  </button>
                   <button
                     className={`pdr-btn ${dayNo ? '' : 'idle'}`}
                     onClick={() => onOpenPdr(iso)}
@@ -444,7 +468,12 @@ function WeekBoard(props: {
                 </div>
                 <div className={`day-body ${overZone === iso ? 'drag-over' : ''}`} {...zone(iso, iso)}>
                   {strips.map((s) => card(s, iso, ids))}
-                  {strips.length === 0 && <span className="drop-hint">— drop scenes here —</span>}
+                  {off && strips.length > 0 && (
+                    <span className="day-warning">
+                      ⚠ Day off, but {strips.length} scene{strips.length === 1 ? ' is' : 's are'} scheduled
+                    </span>
+                  )}
+                  {strips.length === 0 && <span className="drop-hint">{off ? 'Day off' : '— drop scenes here —'}</span>}
                 </div>
                 <div className="day-foot">
                   <span>Total</span>

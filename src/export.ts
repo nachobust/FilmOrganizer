@@ -165,7 +165,7 @@ export async function exportXLSX(p: Project) {
           const strips = stripsOn(p, iso, byId);
           const dayNo = dayNumbers.get(iso);
           const text = [
-            `${date.getDate()}${dayNo ? `   ·   Day ${dayNo}` : ''}`,
+            `${date.getDate()}${p.daysOff.includes(iso) ? '   ·   DAY OFF' : dayNo ? `   ·   Day ${dayNo}` : ''}`,
             ...strips.map((s) => `#${s.scenes || '—'} ${s.set} (${stripKind(s).label})`),
             ...(strips.length ? [`${pagesLabel(strips.reduce((n, s) => n + s.pages, 0))} · ${strips.length} sc`] : []),
           ];
@@ -181,7 +181,10 @@ export async function exportXLSX(p: Project) {
         cell.alignment = { vertical: 'top', wrapText: true };
         cell.border = box;
         if (outside) cell.font = { color: { argb: 'FFA1A1AA' } };
-        if (shoot) {
+        if (p.daysOff.includes(toISO(date))) {
+          cell.font = { bold: true, color: { argb: 'FF9A3B33' } };
+          cell.fill = solid('#f6e0dd');
+        } else if (shoot) {
           cell.font = { bold: true };
           cell.fill = solid('#ededf0');
         } else if (outside) cell.fill = solid('#fafafa');
@@ -373,10 +376,13 @@ export async function exportPDF(p: Project) {
         const strips = stripsOn(p, iso, byId);
         const dayNo = dayNumbers.get(iso);
         doc.setDrawColor(212, 212, 216).setLineWidth(0.5);
-        if (outside) doc.setFillColor(248, 248, 249).rect(x, y, colW, rowH, 'FD');
+        const off = p.daysOff.includes(iso);
+        if (off) doc.setFillColor(246, 224, 221).rect(x, y, colW, rowH, 'FD');
+        else if (outside) doc.setFillColor(248, 248, 249).rect(x, y, colW, rowH, 'FD');
         else doc.rect(x, y, colW, rowH);
         doc.setFont('helvetica', 'bold').setFontSize(9).setTextColor(outside ? 170 : 24).text(String(date.getDate()), x + 5, y + 12);
-        if (dayNo) {
+        if (off) doc.setFont('helvetica', 'bold').setFontSize(7).setTextColor(154, 59, 51).text('DAY OFF', x + colW - 5, y + 12, { align: 'right' });
+        else if (dayNo) {
           const label = `Day ${dayNo}`;
           doc.setFontSize(7);
           const w = doc.getTextWidth(label) + 8;

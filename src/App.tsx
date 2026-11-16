@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type Dispatch } from 'react';
 import { loadAISettings, PROVIDERS, providerSettings, saveAISettings, type AISettings } from './ai';
 import { AIRunModal, AISettingsModal, BriefModal } from './components/AIDialogs';
 import BreakdownTable, { EXTRA_COLS, SCENE_COLS } from './components/BreakdownTable';
+import CallSheetView from './components/CallSheetView';
 import PdrView, { type PdrDay } from './components/PdrView';
 import ScheduleView, { type ScheduleNav } from './components/ScheduleView';
 import SidePanel from './components/SidePanel';
@@ -22,10 +23,10 @@ import { askConfirm, isDesktop } from './platform';
 import { checkForUpdate, loadUpdateSettings, saveUpdateSettings } from './updates';
 import { runRules } from './rules';
 import { attachShotList, projectFromShotList, readShotListFile, SHOT_LIST_ACCEPT } from './shots';
-import { loadSaved, reducer, saveProject, validateProject } from './store';
+import { historyReducer, initHistory, loadSaved, savedAt, saveProject, validateProject, type Action, type History, type HistoryAction } from './store';
 
 type ColumnGroup = CategoryGroup | 'extra';
-type Tab = 'breakdown' | 'schedule' | 'pdr';
+type Tab = 'breakdown' | 'schedule' | 'pdr' | 'callsheet';
 type AIDialog =
   | null
   /** `back` reopens the dialog the settings were opened from. */
@@ -45,7 +46,35 @@ const initialNav = (p: Project): ScheduleNav => ({
 });
 
 export default function App() {
-  const [project, dispatch] = useReducer(reducer, undefined, () => loadSaved() ?? newProject('Untitled'));
+  const [history, dispatchHistory] = useReducer(
+    (h: History, a: HistoryAction) => historyReducer(h, a),
+    undefined,
+    () => initHistory(loadSaved() ?? newProject('Untitled')),
+  );
+  const project = history.present;
+  const dispatch: Dispatch<Action> = dispatchHistory;
+  const undo = () => dispatchHistory({ type: 'undo' });
+  const redo = () => dispatchHistory({ type: 'redo' });
+  useEffect(() => {
+    // Ctrl/Cmd+Z undoes a change to the project, Ctrl+Y or Ctrl/Cmd+Shift+Z redoes it. Inside a text
+    // box the box's own undo runs instead, so typing can be corrected letter by letter there.
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes((t as HTMLInputElement).type)) || t.isContentEditable))
+        return;
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        dispatchHistory({ type: 'undo' });
+      } else if (k === 'y' || (k === 'z' && e.shiftKey)) {
+        e.preventDefault();
+        dispatchHistory({ type: 'redo' });
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const [tab, setTab] = useState<Tab>('breakdown');
   const [nav, setNav] = useState<ScheduleNav>(() => initialNav(project));
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -58,7 +87,13 @@ export default function App() {
   const [aiSettings, setAISettings] = useState<AISettings>(loadAISettings);
   const [aiDialog, setAIDialog] = useState<AIDialog>(null);
   const [pdrDay, setPdrDay] = useState<PdrDay | null>(null);
+  const [callDate, setCallDate] = useState<string | null>(null);
   const [whatsNew, setWhatsNew] = useState(() => shouldShowWhatsNew(loadSaved() !== null));
+  // On opening, a project from last time is offered rather than silently reopened.
+  const [welcome, setWelcome] = useState(() => {
+    const p = loadSaved();
+    return !!p && (p.sheets.length > 0 || p.title !== 'Untitled');
+  });
   const closeWhatsNew = () => {
     markWhatsNewSeen();
     setWhatsNew(false);
@@ -324,6 +359,14 @@ export default function App() {
           onChange={(e) => dispatch({ type: 'setTitle', title: e.target.value })}
           aria-label="Project title"
         />
+        <span className="undo-redo">
+          <button className="ghost" onClick={undo} disabled={!history.past.length} title="Undo (Ctrl+Z)" aria-label="Undo">
+            ↶
+          </button>
+          <button className="ghost" onClick={redo} disabled={!history.future.length} title="Redo (Ctrl+Y)" aria-label="Redo">
+            ↷
+          </button>
+        </span>
         <nav className="view-tabs">
           <button className={tab === 'breakdown' ? 'active' : ''} onClick={() => setTab('breakdown')}>
             Breakdown
@@ -333,6 +376,9 @@ export default function App() {
           </button>
           <button className={tab === 'pdr' ? 'active' : ''} onClick={() => setTab('pdr')} title="Shooting plan per day">
             Shooting plan
+          </button>
+          <button className={tab === 'callsheet' ? 'active' : ''} onClick={() => setTab('callsheet')} title="Call sheet per shooting day, and cast, crew and locations">
+            Call sheet
           </button>
         </nav>
         <span className="spacer" />
@@ -482,7 +528,16 @@ export default function App() {
       )}
 
       <main className="main">
-        {tab === 'pdr' ? (
+        {tab === 'callsheet' ? (
+          <CallSheetView
+            project={project}
+            date={callDate}
+            setDate={setCallDate}
+            dispatch={dispatch}
+            onError={fail}
+            onGoToSchedule={() => setTab('schedule')}
+          />
+        ) : tab === 'pdr' ? (
           <PdrView
             project={project}
             day={pdrDay}
@@ -584,6 +639,42 @@ export default function App() {
           onFound={setNewVersion}
           onClose={() => setUpdatesOpen(false)}
         />
+      )}
+      {welcome && !whatsNew && (
+        <div className="modal-overlay">
+          <div className="modal" role="dialog" aria-labelledby="welcome-title">
+            <h3 id="welcome-title">Welcome back</h3>
+            <p className="modal-text">
+              Your last project is saved on this computer
+              {savedAt()
+                ? `, last changed ${new Date(savedAt()!).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}`
+                : ''}
+              .
+              FilmOrganizer saves as you work, so there is nothing to save before closing.
+            </p>
+            <div className="welcome-actions">
+              <button className="primary" autoFocus onClick={() => setWelcome(false)}>
+                Continue with “{project.title || 'Untitled'}”
+              </button>
+              <button
+                onClick={() => {
+                  setWelcome(false);
+                  projectInput.current?.click();
+                }}
+              >
+                Open a project file…
+              </button>
+              <button
+                onClick={async () => {
+                  setWelcome(false);
+                  await replaceProject(newProject('Untitled'), 'Start a new project? The current one stays only if you exported it as a project file.');
+                }}
+              >
+                New project
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       {whatsNew && (
         <WhatsNewModal
